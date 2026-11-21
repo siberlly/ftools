@@ -1,28 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Register evidence</h1>
-<p class="muted">
-  Register an E01, raw, or img image. Files are opened read-only by Sleuth Kit tools.
-  Allowed roots: {% for root in allowed_roots %}<code>{{ root }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
-</p>
+<header class="page-header">
+  <div>
+    <h1>Evidence workspace</h1>
+    <p class="page-summary">Register disk images, review their status and open a case without changing source evidence.</p>
+  </div>
+</header>
 
 {% if error %}
 <div class="alert error" role="alert">{{ error }}</div>
 {% endif %}
 
-<form class="card form" method="post" action="/evidence">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label for="path">Evidence path</label>
-  <input id="path" name="path" type="text" required
-         placeholder="/home/ubuntu/test/temp_extract_dir/SysInternals.E01"
-         autocomplete="off" spellcheck="false">
-  <button type="submit">Register evidence</button>
-</form>
+<section class="intake-panel" aria-labelledby="register-heading">
+  <div class="intake-copy">
+    <h2 id="register-heading">Register evidence</h2>
+    <p>Add an E01, raw or img file from an allowed root. The source is opened read-only.</p>
+    <details class="allowed-roots">
+      <summary>View allowed roots</summary>
+      <ul>
+        {% for root in allowed_roots %}<li><code>{{ root }}</code></li>{% endfor %}
+      </ul>
+    </details>
+  </div>
+  <form class="form intake-form" method="post" action="/evidence">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="path">Evidence path</label>
+    <div class="input-action-row">
+      <input id="path" name="path" type="text" required
+             placeholder="/evidence/case/image.E01"
+             autocomplete="off" spellcheck="false"
+             aria-describedby="path-hint">
+      <button type="submit">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Register
+      </button>
+    </div>
+    <span class="hint" id="path-hint">Use an absolute path inside one of the allowed roots.</span>
+  </form>
+</section>
 
 {% if evidences %}
-<h2>Registered evidence</h2>
-<div class="table-wrap">
-  <table class="listing">
+<div class="section-heading">
+  <div>
+    <h2>Registered evidence</h2>
+    <p class="muted">{{ evidences|length }} available in this workspace</p>
+  </div>
+</div>
+<div class="table-wrap evidence-table-wrap">
+  <table class="listing evidence-table">
     <thead>
       <tr>
         <th>ID</th><th>File</th><th>Format</th><th>Media size</th>
@@ -32,19 +59,30 @@
     <tbody>
       {% for item in evidences %}
       <tr>
-        <td><a href="/evidence/{{ item.evidence_id }}"><code>{{ item.evidence_id }}</code></a></td>
-        <td>{{ item.filename }}</td>
-        <td>{{ item.format }}</td>
-        <td>{{ item.media_size|filesize }}</td>
-        <td>{{ item.layout.filesystem or "unknown" }}</td>
-        <td>{{ item.layout.scope }}</td>
-        <td>{{ item.status }}</td>
+        <td data-label="ID"><code>{{ item.evidence_id }}</code></td>
+        <td data-label="File"><a class="evidence-link" href="/evidence/{{ item.evidence_id }}">{{ item.filename }}</a></td>
+        <td data-label="Format">{{ item.format }}</td>
+        <td data-label="Media size">{{ item.media_size|filesize }}</td>
+        <td data-label="Filesystem">{{ item.layout.filesystem or "unknown" }}</td>
+        <td data-label="Scope">{{ item.layout.scope }}</td>
+        <td data-label="Status"><span class="status-badge">{{ item.status }}</span></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 {% else %}
-<p class="muted">No evidence registered yet.</p>
+<section class="empty-state" aria-labelledby="empty-heading">
+  <span class="empty-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+      <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Z" stroke="currentColor" stroke-width="1.7"/>
+      <path d="m4.5 8 7.5 4 7.5-4M12 12v8.5" stroke="currentColor" stroke-width="1.7"/>
+    </svg>
+  </span>
+  <div>
+    <h2 id="empty-heading">No evidence registered</h2>
+    <p>Add an image above. It will appear here with its format, filesystem and processing status.</p>
+  </div>
+</section>
 {% endif %}
 {% endblock %}

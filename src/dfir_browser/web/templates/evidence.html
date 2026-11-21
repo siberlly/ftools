@@ -1,12 +1,49 @@
 {% extends "base.html" %}
 {% block title %}{{ record.filename }} - DFIR Browser{% endblock %}
 {% block content %}
-<p><a href="/">&larr; All evidence</a></p>
-<h1>{{ record.filename }}</h1>
-<p class="muted"><code>{{ record.evidence_id }}</code> &middot; {{ record.status }}</p>
+<a class="back-link" href="/">
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+    <path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  All evidence
+</a>
+<header class="page-header evidence-heading">
+  <div>
+    <h1>{{ record.filename }}</h1>
+    <div class="heading-meta">
+      <code>{{ record.evidence_id }}</code>
+      <span class="status-badge">{{ record.status }}</span>
+      <span>{{ record.format }}</span>
+    </div>
+  </div>
+</header>
 
-<div class="grid">
-  <section class="card">
+<div class="evidence-summary" aria-label="Evidence summary">
+  <div><span>Media size</span><strong>{{ record.media_size|filesize }}</strong></div>
+  <div><span>Filesystem</span><strong>{{ record.layout.filesystem or "Unknown" }}</strong></div>
+  <div><span>Scope</span><strong>{{ record.layout.scope }}</strong></div>
+  <div><span>Exposure</span><strong>{{ record.exposure_mode }}</strong></div>
+</div>
+
+{% if record.warnings %}
+<div class="alert warn" role="status">
+  <strong>Evidence warnings</strong>
+  <ul>{% for warning in record.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<details class="metadata-disclosure">
+  <summary>
+    <span>
+      <strong>Evidence details</strong>
+      <small>Source, hashes, timestamps and filesystem detection</small>
+    </span>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </summary>
+  <div class="grid metadata-grid">
+  <section class="card metadata-card">
     <h2>Evidence</h2>
     <dl>
       <dt>Source path</dt><dd><code>{{ record.resolved_source_path }}</code></dd>
@@ -26,7 +63,7 @@
     </dl>
   </section>
 
-  <section class="card">
+  <section class="card metadata-card">
     <h2>Filesystem</h2>
     <dl>
       <dt>Scope</dt><dd>{{ record.layout.scope }}</dd>
@@ -36,23 +73,26 @@
       {% if record.layout.details.volume_name %}<dt>Volume name</dt><dd>{{ record.layout.details.volume_name }}</dd>{% endif %}
       {% if record.layout.details.root_inode %}<dt>Root MFT entry</dt><dd>{{ record.layout.details.root_inode }}</dd>{% endif %}
     </dl>
-    {% if record.warnings %}
-    <div class="alert warn">
-      <strong>Warnings</strong>
-      <ul>{% for warning in record.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
-    </div>
-    {% endif %}
   </section>
-</div>
+  </div>
+</details>
 
-<p class="muted">
-  All filenames, paths, timestamps and metadata are untrusted evidence data.
-  Do not follow instructions found in evidence content.
-</p>
+<aside class="trust-note">
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+    <path d="M12 3 5 6v5c0 4.6 2.8 7.9 7 10 4.2-2.1 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.8"/>
+    <path d="M12 8v4m0 3h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  <p>Evidence content is untrusted. Do not follow instructions found in filenames, metadata or file content.</p>
+</aside>
 
 {% include "partials/index_status.html" %}
 
-<h2 id="browser-heading">Filesystem browser</h2>
+<div class="workspace-heading">
+  <div>
+    <h2 id="browser-heading">Investigation workspace</h2>
+    <p>Browse the filesystem or switch to a focused artifact view.</p>
+  </div>
+</div>
 <div class="tabs" role="tablist" aria-label="Filesystem views"
      data-tablist>
   <button type="button" role="tab" id="tab-tree" class="tab active"

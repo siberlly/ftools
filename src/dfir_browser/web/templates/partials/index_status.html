@@ -1,9 +1,11 @@
-<section class="card index-status" id="index-status"
+<details class="card index-status" id="index-status"
+  {% if not status.complete or error %}open{% endif %}
   {% if status.status == "running" %}
   hx-get="/evidence/{{ status.evidence_id }}/index/status"
   hx-trigger="every 2s"
   hx-swap="outerHTML"
   {% endif %}>
+  <summary class="index-status-summary">
   <div class="detail-head">
     <h2>Filesystem index</h2>
     <span class="badge {% if status.complete %}ok{% elif status.status in ('failed', 'interrupted') %}deleted{% else %}unalloc{% endif %}">
@@ -12,6 +14,13 @@
     {% if status.stale %}<span class="badge deleted">stale</span>{% endif %}
     {% if status.complete %}<span class="badge ok">complete</span>{% else %}<span class="badge unalloc">incomplete</span>{% endif %}
   </div>
+  <span class="index-status-toggle" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+      <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </span>
+  </summary>
+  <div class="index-status-body">
 
   {% if error %}
   <div class="alert error" role="alert">{{ error }}</div>
@@ -53,4 +62,5 @@
       {% if status.found %}Rebuild index{% else %}Build index{% endif %}
     </button>
   </form>
-</section>
+  </div>
+</details>
