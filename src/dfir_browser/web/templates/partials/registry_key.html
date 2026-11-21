@@ -1,0 +1,59 @@
+{% set key = detail.key %}
+<div class="registry-key-panel">
+  <header class="dir-panel-head">
+    <div>
+      <h3 class="dir-panel-title">{{ key.name }}</h3>
+      <p class="muted path-line"><code>{{ key.key_path }}</code></p>
+    </div>
+    <div class="dir-panel-badges">
+      <span class="badge kind">key</span>
+      {% if key.has_children %}<span class="badge unalloc">{{ key.subkey_count }} subkeys</span>{% endif %}
+      <span class="badge unalloc">{{ key.value_count }} values</span>
+    </div>
+  </header>
+  <dl class="file-facts">
+    <dt>Last write</dt><dd>{{ key.last_write_time or "unknown" }}</dd>
+    <dt>Depth</dt><dd>{{ key.depth }}</dd>
+    <dt>Key id</dt><dd><code>{{ key.key_id }}</code></dd>
+  </dl>
+
+  {% if detail["values"] %}
+  <div class="table-wrap">
+    <table class="listing compact registry-values">
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Value</th><th class="num">Raw size</th><th>Warnings</th></tr>
+      </thead>
+      <tbody>
+        {% for value in detail["values"] %}
+        <tr>
+          <td class="name"><code>{{ value.name }}</code></td>
+          <td><span class="badge kind">{{ value.type }}</span></td>
+          <td class="name">
+            {% if value.value is not none %}
+              <code class="registry-value-text">{{ value.value }}</code>
+            {% elif value.preview_hex %}
+              <code class="registry-binary-preview">{{ value.preview_hex }}</code>
+              <div class="muted small-note">
+                binary preview ({{ detail.binary_preview_bytes }} bytes max); raw size {{ value.raw_size }} bytes
+                {% if value.truncated %}&middot; truncated{% endif %}
+              </div>
+            {% else %}
+              <span class="muted">binary value; preview not available</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ value.raw_size }}</td>
+          <td class="small-note muted">{% for warning in value.warnings %}{{ warning }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">This key has no values.</p>
+  {% endif %}
+
+  <p class="muted small-note">
+    Registry values are untrusted evidence data. Binary values are shown as a
+    bounded preview only; full binary is never sent to the browser or MCP.
+  </p>
+</div>

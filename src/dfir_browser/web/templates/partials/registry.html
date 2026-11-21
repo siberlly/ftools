@@ -1,0 +1,100 @@
+{% set result = result %}
+<div class="registry-view">
+  <div class="detail-head">
+    <h2>Registry hives</h2>
+    <span class="muted">{{ result.total }} candidates</span>
+  </div>
+  <p class="muted small-note">
+    Registry hives are discovered from the filesystem index. Parsing is
+    read-only and offline. SAM and SECURITY are metadata-only: credential
+    material is never decrypted or extracted.
+  </p>
+  <div class="registry-toolbar">
+    {% if include_deleted %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/registry?include_deleted=0"
+            hx-target="#tab-content" hx-swap="innerHTML">Hide deleted hives</button>
+    {% else %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/registry?include_deleted=1"
+            hx-target="#tab-content" hx-swap="innerHTML">Show deleted hives</button>
+    {% endif %}
+  </div>
+
+  {% if result.items %}
+  <div class="table-wrap registry-hive-table">
+    <table class="listing compact">
+      <thead>
+        <tr>
+          <th>Hive</th><th>Type</th><th>Profile</th><th>Evidence path</th>
+          <th class="num">Size</th><th class="num">MFT</th><th>State</th>
+          <th>Index</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for hive in result.items %}
+        <tr class="{% if hive.deleted %}deleted{% endif %}{% if highlight is defined and highlight is not none and hive.entry_id == highlight %} registry-row-highlight{% endif %}"
+            {% if highlight is defined and highlight is not none and hive.entry_id == highlight %}id="registry-focus-row"{% endif %}>
+          <td class="name">
+            {{ hive.name }}
+            {% if hive.deleted %}<span class="badge deleted">deleted</span>{% endif %}
+            {% if hive.sensitive %}<span class="badge unalloc" title="Sensitive hive">sensitive</span>{% endif %}
+            {% if hive.dirty %}<span class="badge unalloc">dirty</span>{% endif %}
+          </td>
+          <td><span class="badge kind">{{ hive.hive_type }}</span></td>
+          <td>{{ hive.owner or "" }}</td>
+          <td class="name"><code>{{ hive.path }}</code></td>
+          <td class="num">{{ hive.size|filesize }}</td>
+          <td class="num">{{ hive.inode if hive.inode is not none else "" }}</td>
+          <td>
+            {% if hive.state %}
+            <span class="badge {% if hive.state == 'ready' %}ok{% elif hive.state == 'partial' %}unalloc{% elif hive.state in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">{{ hive.state }}</span>
+            {% else %}
+            <span class="muted">not indexed</span>
+            {% endif %}
+          </td>
+          <td class="small-note">
+            {% if hive.state in ('ready','partial') %}
+              {{ hive.key_count }} keys / {{ hive.value_count }} values
+              {% if hive.amcache_count %}<br>{{ hive.amcache_count }} Amcache records{% endif %}
+            {% elif hive.signature_status %}
+              {{ hive.signature_status }}
+            {% endif %}
+          </td>
+          <td class="nowrap">
+            <div class="entry-actions">
+              {% if hive.state in ('ready','partial') and hive.hive_id %}
+              <button type="button" class="link"
+                      hx-get="/registry/hives/{{ hive.hive_id }}"
+                      hx-target="#tab-content" hx-swap="innerHTML">Open</button>
+              {% endif %}
+              {% if hive.state in ('ready','partial') and hive.hive_id %}
+              <form hx-post="/evidence/{{ record.evidence_id }}/registry/{{ hive.entry_id }}/index"
+                    hx-target="#hive-status-{{ hive.entry_id }}" hx-swap="innerHTML"
+                    hx-confirm="Rebuild the registry index for {{ hive.name }}? The working copy will be re-extracted if needed.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="rebuild" value="1">
+                <button type="submit" class="link">Rebuild</button>
+              </form>
+              {% else %}
+              <form hx-post="/evidence/{{ record.evidence_id }}/registry/{{ hive.entry_id }}/index"
+                    hx-target="#hive-status-{{ hive.entry_id }}" hx-swap="innerHTML">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="rebuild" value="0">
+                <button type="submit" class="link">Build index</button>
+              </form>
+              {% endif %}
+              <button type="button" class="link" data-reveal-entry="{{ hive.entry_id }}"
+                      title="Reveal this hive in the filesystem tree">Reveal in tree</button>
+            </div>
+            <div id="hive-status-{{ hive.entry_id }}" class="registry-status-slot"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No registry hives were found in this evidence.</p>
+  {% endif %}
+</div>

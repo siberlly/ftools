@@ -1,0 +1,155 @@
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {% for crumb in listing.breadcrumb %}
+    {% if loop.first %}
+      <a href="#"
+         {% if crumb.path is defined %}
+         hx-get="/evidence/{{ listing.evidence_id }}/browse?path={{ crumb.path|urlencode }}"
+         {% else %}
+         hx-get="/evidence/{{ listing.evidence_id }}/browse?inode={{ crumb.inode }}"
+         {% endif %}
+         hx-target="#tab-content" hx-swap="innerHTML">/</a>
+    {% else %}
+      <span class="sep">/</span>
+      {% if loop.last %}
+        <span class="current">{{ crumb.name }}</span>
+      {% else %}
+        <a href="#"
+           {% if crumb.path is defined %}
+           hx-get="/evidence/{{ listing.evidence_id }}/browse?path={{ crumb.path|urlencode }}"
+           {% else %}
+           hx-get="/evidence/{{ listing.evidence_id }}/browse?inode={{ crumb.inode }}"
+           {% endif %}
+           hx-target="#tab-content" hx-swap="innerHTML">{{ crumb.name }}</a>
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+</nav>
+
+{% if listing.source == "live" %}
+<div class="alert warn">
+  <strong>LIVE RESULT</strong> &mdash; index status:
+  {{ listing.index_status or "unknown" }}.
+  {{ listing.warning or "This listing comes directly from fls." }}
+</div>
+{% elif not listing.complete %}
+<div class="alert warn">
+  <strong>INCOMPLETE INDEX RESULT.</strong>
+  {{ listing.warning or "This index may be missing entries." }}
+</div>
+{% endif %}
+
+{% if listing.truncated %}
+<div class="alert error" role="alert">
+  <strong>INCOMPLETE LISTING.</strong>
+  {{ listing.warning }}
+  <span class="badge deleted">truncated</span>
+</div>
+{% endif %}
+
+<p class="muted">
+  {% if listing.source == "index" %}
+    Indexed path <code>/{{ listing.path }}</code> &middot;
+    page {{ listing.page }} &middot; {{ listing.total }} entries &middot;
+    {% if listing.complete %}complete{% else %}incomplete{% endif %}
+  {% else %}
+    MFT entry {{ listing.inode }} &middot; live fls &middot;
+    offset {{ listing.offset_sectors }} sectors &middot;
+    {% if listing.complete %}complete{% else %}incomplete{% endif %}
+  {% endif %}
+  &middot; {{ listing.entries|length }} shown
+</p>
+
+{% if listing.source == "index" %}
+<div class="browse-actions">
+  <button type="button" class="tab"
+          hx-get="/evidence/{{ listing.evidence_id }}/entries?path={{ listing.path|urlencode }}"
+          hx-target="#tab-content" hx-swap="innerHTML">
+    All entries under this directory
+  </button>
+</div>
+{% endif %}
+
+{% if listing.warnings %}
+<div class="alert warn">
+  <ul>
+    {% for warning in listing.warnings if warning != listing.warning %}
+    <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if listing.entries %}
+<div class="table-wrap">
+  <table class="listing">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Size</th>
+        <th class="num">MFT</th>
+        <th>Modified (UTC)</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in listing.entries %}
+      <tr class="{% if entry.deleted %}deleted{% endif %}">
+        <td class="name">
+          {% set entry_name = entry.basename or entry.name %}
+          {% if entry.entry_type == "directory" %}
+            <button type="button" class="link"
+                    {% if entry.full_path is not none %}
+                    hx-get="/evidence/{{ listing.evidence_id }}/browse?path={{ entry.full_path|urlencode }}"
+                    {% else %}
+                    hx-get="/evidence/{{ listing.evidence_id }}/browse?inode={{ entry.inode }}"
+                    {% endif %}
+                    hx-target="#tab-content" hx-swap="innerHTML"
+                    title="Open directory">{{ entry_name }}</button>
+          {% elif entry.inode %}
+            <button type="button" class="link"
+                    hx-get="/evidence/{{ listing.evidence_id }}/stat/{{ entry.inode }}"
+                    hx-target="#detail" hx-swap="innerHTML"
+                    title="Show metadata">{{ entry_name }}</button>
+          {% else %}
+            {{ entry_name }}
+          {% endif %}
+        </td>
+        <td>{{ entry.entry_type }}</td>
+        <td>{% if entry.size is not none %}{{ entry.size|filesize }}{% endif %}</td>
+        <td class="num">{{ entry.inode }}</td>
+        <td class="nowrap">{{ entry.mtime or "" }}</td>
+        <td class="nowrap">
+          {% if entry.deleted %}
+            <span class="badge deleted">DELETED / UNALLOCATED</span>
+          {% else %}
+            <span class="badge ok">allocated</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if listing.total is not none and listing.page_size %}
+<div class="pagination">
+  {% if listing.prev_url %}
+  <button type="button" class="tab"
+          hx-get="{{ listing.prev_url }}" hx-target="#tab-content"
+          hx-swap="innerHTML">&larr; Previous</button>
+  {% endif %}
+  <span class="muted">
+    Page {{ listing.page }} of
+    {{ ((listing.total + listing.page_size - 1) // listing.page_size) }}
+  </span>
+  {% if listing.next_url %}
+  <button type="button" class="tab"
+          hx-get="{{ listing.next_url }}" hx-target="#tab-content"
+          hx-swap="innerHTML">Next &rarr;</button>
+  {% endif %}
+</div>
+{% endif %}
+{% else %}
+<p class="muted">This directory is empty.</p>
+{% endif %}

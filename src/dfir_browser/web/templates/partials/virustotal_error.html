@@ -1,0 +1,34 @@
+{% set code = vt_error.code if vt_error.code is defined else "virustotal_error" %}
+<div class="alert {% if code in ('virustotal_rate_limited', 'virustotal_unavailable', 'virustotal_timeout', 'virustotal_network_error') %}warn{% else %}error{% endif %}"
+     role="alert">
+  <strong>
+    {% if code == "virustotal_not_configured" %}
+      VirusTotal is not configured.
+    {% elif code == "virustotal_invalid_key" %}
+      VirusTotal rejected the API key.
+    {% elif code == "virustotal_forbidden" %}
+      VirusTotal denied this lookup.
+    {% elif code == "virustotal_rate_limited" %}
+      VirusTotal quota or rate limit reached.
+    {% elif code == "virustotal_timeout" %}
+      VirusTotal request timed out.
+    {% elif code == "virustotal_network_error" %}
+      VirusTotal is unreachable.
+    {% elif code == "virustotal_tls_error" %}
+      TLS verification with VirusTotal failed.
+    {% elif code == "virustotal_invalid_response" %}
+      VirusTotal returned an invalid response.
+    {% elif code == "virustotal_response_too_large" %}
+      VirusTotal response exceeded the size limit.
+    {% else %}
+      VirusTotal lookup failed.
+    {% endif %}
+  </strong>
+  <p>{{ vt_error.message }}</p>
+  {% if vt_error.details and vt_error.details.retry_after %}
+  <p class="small-note">Retry after about {{ vt_error.details.retry_after }} seconds.</p>
+  {% endif %}
+  <p class="small-note muted">
+    No evidence file was uploaded. Static triage and browsing are unaffected.
+  </p>
+</div>

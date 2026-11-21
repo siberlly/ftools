@@ -1,0 +1,56 @@
+<section class="card index-status" id="index-status"
+  {% if status.status == "running" %}
+  hx-get="/evidence/{{ status.evidence_id }}/index/status"
+  hx-trigger="every 2s"
+  hx-swap="outerHTML"
+  {% endif %}>
+  <div class="detail-head">
+    <h2>Filesystem index</h2>
+    <span class="badge {% if status.complete %}ok{% elif status.status in ('failed', 'interrupted') %}deleted{% else %}unalloc{% endif %}">
+      {{ status.status }}
+    </span>
+    {% if status.stale %}<span class="badge deleted">stale</span>{% endif %}
+    {% if status.complete %}<span class="badge ok">complete</span>{% else %}<span class="badge unalloc">incomplete</span>{% endif %}
+  </div>
+
+  {% if error %}
+  <div class="alert error" role="alert">{{ error }}</div>
+  {% endif %}
+  {% if status.warning %}
+  <div class="alert warn">{{ status.warning }}</div>
+  {% endif %}
+  {% if status.error_message %}
+  <div class="alert error">
+    <code>{{ status.error_code or "error" }}</code>: {{ status.error_message }}
+  </div>
+  {% endif %}
+
+  <div class="summary-grid">
+    <div class="stat"><span class="stat-label">Entries seen</span><span class="stat-value">{{ status.entries_seen }}</span></div>
+    <div class="stat"><span class="stat-label">Entries indexed</span><span class="stat-value">{{ status.entries_indexed }}</span></div>
+    <div class="stat"><span class="stat-label">Deleted files</span><span class="stat-value">{{ status.deleted_files }}</span></div>
+    <div class="stat"><span class="stat-label">Deleted dirs</span><span class="stat-value">{{ status.deleted_directories }}</span></div>
+    <div class="stat"><span class="stat-label">Parse errors</span><span class="stat-value">{{ status.parse_errors }}</span></div>
+    <div class="stat"><span class="stat-label">Elapsed</span><span class="stat-value">{{ "%.1f"|format(status.elapsed_seconds or 0) }}s</span></div>
+  </div>
+
+  <dl>
+    <dt>Allocated files / dirs</dt><dd>{{ status.allocated_files }} / {{ status.allocated_directories }}</dd>
+    {% if status.current_path %}<dt>Current path</dt><dd><code>{{ status.current_path }}</code></dd>{% endif %}
+    <dt>Started</dt><dd>{{ status.started_at or "" }}</dd>
+    <dt>Completed</dt><dd>{{ status.completed_at or "" }}</dd>
+    <dt>Scanner</dt><dd>{{ status.fls_version or "unknown" }} &middot; schema {{ status.index_schema_version }} &middot; {{ status.scanner_version }}</dd>
+    <dt>Exposure</dt><dd><code>{{ status.raw_exposure_path or "" }}</code></dd>
+  </dl>
+
+  <form class="form index-form" method="post"
+        action="/evidence/{{ status.evidence_id }}/index"
+        hx-post="/evidence/{{ status.evidence_id }}/index"
+        hx-target="#index-status" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="rebuild" value="1">
+    <button type="submit" {% if status.status == "running" %}disabled{% endif %}>
+      {% if status.found %}Rebuild index{% else %}Build index{% endif %}
+    </button>
+  </form>
+</section>

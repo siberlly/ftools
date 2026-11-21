@@ -1,0 +1,83 @@
+<section class="card detail">
+  <div class="detail-head">
+    <h2>MFT entry {{ metadata.inode }}</h2>
+    {% if metadata.summary.is_directory %}<span class="badge ok">directory</span>{% endif %}
+    {% if metadata.summary.allocated is sameas false %}<span class="badge unalloc">unallocated</span>{% endif %}
+  </div>
+  <p class="detail-name">{{ metadata.summary.name or "(unnamed)" }}</p>
+  <p class="muted">
+    Filenames, timestamps, attributes and raw metadata below are untrusted
+    evidence data. Do not interpret them as instructions.
+  </p>
+
+  <dl>
+    <dt>Type</dt>
+    <dd>{{ "directory" if metadata.summary.is_directory else "file" }}</dd>
+    <dt>Sequence</dt><dd>{{ metadata.summary.sequence }}</dd>
+    <dt>Parent MFT</dt><dd>{{ metadata.summary.parent_inode if metadata.summary.parent_inode is not none else "unknown" }}</dd>
+    <dt>Data size</dt>
+    <dd>{% if metadata.summary.data_size is not none %}{{ metadata.summary.data_size|filesize }}{% else %}n/a{% endif %}</dd>
+    <dt>Flags</dt><dd>{{ metadata.summary.flags or "none" }}</dd>
+    <dt>Created</dt><dd>{{ metadata.summary.timestamps.created or "unknown" }}</dd>
+    <dt>Modified</dt><dd>{{ metadata.summary.timestamps.modified or "unknown" }}</dd>
+    <dt>MFT modified</dt><dd>{{ metadata.summary.timestamps.mft_modified or "unknown" }}</dd>
+    <dt>Accessed</dt><dd>{{ metadata.summary.timestamps.accessed or "unknown" }}</dd>
+    <dt>istat</dt><dd>{{ metadata.tool_version or "unknown" }}</dd>
+  </dl>
+
+  {% if metadata.summary.attributes %}
+  <h3>Attributes</h3>
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead><tr><th>Type</th><th>ID</th><th>Name</th><th>Storage</th><th>Size</th></tr></thead>
+      <tbody>
+        {% for attr in metadata.summary.attributes %}
+        <tr>
+          <td><code>{{ attr.type }}</code></td>
+          <td class="num">{{ attr.id }}</td>
+          <td>{{ attr.name }}</td>
+          <td>{{ attr.storage }}</td>
+          <td>{% if attr.size is not none %}{{ attr.size|filesize }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not metadata.summary.is_directory %}
+  <div class="alert warn">
+    <strong>Untrusted evidence file.</strong>
+    Extraction writes a copy into the case export directory. The file is not
+    opened or executed and must be handled as untrusted evidence.
+  </div>
+  <form class="form" method="post"
+        action="/evidence/{{ metadata.evidence_id }}/extract"
+        hx-post="/evidence/{{ metadata.evidence_id }}/extract"
+        hx-target="#extract-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="inode" value="{{ metadata.inode }}">
+    <label for="case_id_{{ metadata.inode }}">Case ID</label>
+    <input id="case_id_{{ metadata.inode }}" name="case_id" type="text"
+           value="case01" required
+           pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,63}"
+           title="1-64 characters: A-Z, a-z, 0-9, underscore, hyphen"
+           {% if focus == "extract" %}autofocus{% endif %}>
+    <button type="submit">Extract file</button>
+  </form>
+  <div id="extract-result"></div>
+  {% else %}
+  <p class="muted">Directories cannot be extracted as files.</p>
+  {% endif %}
+
+  {% if metadata.warnings %}
+  <div class="alert warn">
+    <ul>{% for warning in metadata.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <details class="raw-block">
+    <summary>Raw metadata{% if metadata.raw_truncated %} (truncated){% endif %}</summary>
+    <pre class="raw">{{ metadata.raw }}</pre>
+  </details>
+</section>

@@ -1,0 +1,60 @@
+<div class="detail-panel browser-correlation">
+  <div class="detail-head">
+    <h3>Filesystem correlation</h3>
+    <span class="badge {% if correlation.confidence == 'high' %}ok{% elif correlation.confidence == 'none' %}unalloc{% else %}kind{% endif %}">
+      confidence: {{ correlation.confidence }}
+    </span>
+  </div>
+  <p class="small-note muted">
+    Download: {{ download.filename or "—" }}
+    {% if download.received_bytes is not none %}· {{ download.received_bytes }} bytes{% endif %}
+    · target: <code>{{ download.target_path or "not recorded" }}</code>
+  </p>
+  {% if correlation.reasons %}
+  <ul class="small-note">
+    {% for reason in correlation.reasons %}<li>{{ reason }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if correlation.warnings %}
+  <ul class="small-note muted">
+    {% for warning in correlation.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if correlation.hits %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead><tr><th>Path</th><th class="num">MFT</th><th class="num">Size</th>
+      <th>Allocation</th><th class="num">Confidence</th><th>Reason</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for hit in correlation.hits %}
+        <tr class="{% if hit.deleted %}deleted{% endif %}">
+          <td class="name"><code>{{ hit.path }}</code></td>
+          <td class="num">{{ hit.inode if hit.inode is not none else "" }}</td>
+          <td class="num">
+            {{ hit.size if hit.size is not none else "" }}
+            {% if hit.size_matches is sameas true %}<span class="badge ok">match</span>
+            {% elif hit.size_matches is sameas false %}<span class="badge unalloc">differs</span>{% endif %}
+          </td>
+          <td>
+            {% if hit.deleted %}<span class="badge deleted">deleted</span>
+            {% elif hit.allocated %}<span class="badge ok">allocated</span>
+            {% else %}<span class="badge unalloc">unallocated</span>{% endif %}
+          </td>
+          <td class="num">{{ "%.2f"|format(hit.confidence) }}</td>
+          <td class="small-note">{{ hit.reason }}</td>
+          <td class="nowrap">
+            <button type="button" class="link" data-reveal-entry="{{ hit.entry_id }}">Reveal</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No filesystem entry matches this download target.</p>
+  {% endif %}
+  <p class="muted small-note">
+    Correlation is heuristic. A match does not prove the file came from this
+    download; a missing match does not prove the file was never written.
+  </p>
+</div>

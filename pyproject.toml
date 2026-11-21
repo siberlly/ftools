@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dfir-browser"
+version = "0.10.0"
+description = "Read-only DFIR filesystem browser for E01/RAW evidence with a FastAPI UI and an MCP stdio server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "DFIR Browser" }]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "mcp>=1.2,<2",
+  "pefile>=2023.2.7",
+  "yara-python>=4.5",
+  "python-registry>=1.3.1,<2",
+  "evtx>=0.15,<1",
+  "defusedxml>=0.7.1,<1",
+  "dissect.esedb>=3.18,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "httpx>=0.27",
+]
+
+[project.scripts]
+dfir-browser = "dfir_browser.web.app:main"
+dfir-browser-mcp = "dfir_browser.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dfir_browser"]
+[tool.hatch.build.targets.wheel.force-include]
+"rules" = "dfir_browser/rules"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+markers = [
+  "integration: uses the real evidence image in read-only mode",
+]

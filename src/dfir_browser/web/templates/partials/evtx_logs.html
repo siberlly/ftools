@@ -1,0 +1,123 @@
+{% set result = result %}
+<div class="evtx-view">
+  <div class="detail-head">
+    <h2>Windows event logs</h2>
+    <span class="muted">{{ result.total }} EVTX candidates</span>
+  </div>
+  <p class="muted small-note">
+    Event logs are detected from the filesystem index and parsed offline from a
+    read-only working copy. Event data, XML and any command line inside an event
+    are untrusted evidence; they are never executed.
+  </p>
+  <div class="registry-toolbar">
+    {% if include_deleted %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/event-logs?include_deleted=0"
+            hx-target="#tab-content" hx-swap="innerHTML">Hide deleted logs</button>
+    {% else %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/event-logs?include_deleted=1"
+            hx-target="#tab-content" hx-swap="innerHTML">Show deleted logs</button>
+    {% endif %}
+    {% if indexed_only %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/event-logs?indexed_only=0"
+            hx-target="#tab-content" hx-swap="innerHTML">Show all candidates</button>
+    {% else %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/event-logs?indexed_only=1"
+            hx-target="#tab-content" hx-swap="innerHTML">Show indexed only</button>
+    {% endif %}
+    <span class="muted small-note">
+      Indexing runs one job at a time; start priority logs individually.
+    </span>
+  </div>
+
+  {% if result.items %}
+  <div class="table-wrap evtx-log-table">
+    <table class="listing compact">
+      <thead>
+        <tr>
+          <th>Log / channel</th><th>Evidence path</th><th class="num">Size</th>
+          <th class="num">MFT</th><th>State</th><th>First event</th>
+          <th>Last event</th><th class="num">Records</th>
+          <th class="num">Errors</th><th>Index</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in result.items %}
+        <tr class="{% if log.deleted %}deleted{% endif %}">
+          <td class="name">
+            {{ log.filename }}
+            {% if log.priority %}<span class="badge kind">priority</span>{% endif %}
+            {% if log.deleted %}<span class="badge deleted">deleted</span>{% endif %}
+            <div class="muted small-note">{{ log.channel }}</div>
+          </td>
+          <td class="name"><code>{{ log.path }}</code></td>
+          <td class="num">{{ log.size|filesize }}</td>
+          <td class="num">{{ log.inode if log.inode is not none else "" }}</td>
+          <td>
+            {% if log.allocated %}<span class="badge ok">allocated</span>
+            {% else %}<span class="badge unalloc">unallocated</span>{% endif %}
+          </td>
+          <td class="nowrap small-note">{{ log.first_event_time or "" }}</td>
+          <td class="nowrap small-note">{{ log.last_event_time or "" }}</td>
+          <td class="num">{{ log.records_indexed }}</td>
+          <td class="num">{{ log.parse_errors }}</td>
+          <td>
+            {% if log.state %}
+            <span class="badge {% if log.state == 'ready' %}ok{% elif log.state == 'partial' %}unalloc{% elif log.state in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">{{ log.state }}</span>
+            {% else %}<span class="muted">not indexed</span>{% endif %}
+          </td>
+          <td class="nowrap">
+            <div class="entry-actions">
+              {% if log.state in ('ready','partial') and log.log_id %}
+              <button type="button" class="link"
+                      hx-get="/event-logs/{{ log.log_id }}"
+                      hx-target="#tab-content" hx-swap="innerHTML">Open</button>
+              {% endif %}
+              <form hx-post="/evidence/{{ record.evidence_id }}/event-logs/{{ log.entry_id }}/index"
+                    hx-target="#evtx-status-{{ log.entry_id }}" hx-swap="innerHTML"
+                    {% if log.state in ('ready','partial') %}hx-confirm="Rebuild the EVTX index for {{ log.filename }}?"{% endif %}>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="rebuild" value="{% if log.state in ('ready','partial') %}1{% else %}0{% endif %}">
+                <button type="submit" class="link">{% if log.state in ('ready','partial') %}Rebuild{% else %}Build index{% endif %}</button>
+              </form>
+              <button type="button" class="link" data-reveal-entry="{{ log.entry_id }}"
+                      title="Reveal this log in the filesystem tree">Reveal</button>
+            </div>
+            <div id="evtx-status-{{ log.entry_id }}" class="registry-status-slot"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No EVTX files were found in this evidence.</p>
+  {% endif %}
+
+  <details class="triage-block">
+    <summary>Investigation presets ({{ presets|length }})</summary>
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Preset</th><th>Channels / providers</th><th>Event IDs</th><th>Meaning</th><th>Limitations</th></tr></thead>
+        <tbody>
+          {% for preset in presets %}
+          <tr>
+            <td><code>{{ preset.rule_id }}</code><div class="small-note">{{ preset.name }}</div></td>
+            <td class="small-note">{{ preset.channels|join(", ") }}{% if preset.providers %}<br>{{ preset.providers|join(", ") }}{% endif %}</td>
+            <td class="small-note">{{ preset.event_ids|join(", ") }}</td>
+            <td class="small-note">{{ preset.description }}</td>
+            <td class="small-note muted">{{ preset.limitations }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small-note">
+      Presets are filters, not verdicts. An event appearing does not mean the
+      activity was malicious.
+    </p>
+  </details>
+</div>

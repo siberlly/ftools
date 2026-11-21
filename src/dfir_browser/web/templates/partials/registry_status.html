@@ -1,0 +1,62 @@
+{% if not hive %}
+<div class="alert error">Registry index job is unavailable. {{ start_error or "" }}</div>
+{% else %}
+<div class="registry-status" data-state="{{ hive.state }}"
+  {% if hive.state in ('queued', 'running') and hive.hive_id %}
+  hx-get="/registry/hives/{{ hive.hive_id }}/status"
+  hx-trigger="every 1s" hx-swap="outerHTML"
+  {% endif %}>
+  {% if start_error %}
+  <div class="alert error" role="alert">{{ start_error }}</div>
+  {% endif %}
+  <div class="triage-status-line">
+    <span class="badge {% if hive.state == 'ready' %}ok{% elif hive.state == 'partial' %}unalloc{% elif hive.state in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">{{ hive.state }}</span>
+    <span class="badge kind">phase: {{ hive.phase }}</span>
+    {% if hive.dirty %}<span class="badge unalloc">dirty</span>{% endif %}
+    {% if hive.sensitive %}<span class="badge unalloc">sensitive</span>{% endif %}
+  </div>
+  {% if hive.state in ('queued', 'running') %}
+  <p class="muted small-note">
+    Indexing hive <code>{{ hive.name }}</code> ({{ hive.phase }}). Parsing is
+    read-only and never replays transaction logs automatically.
+  </p>
+  <div class="triage-progress"><span></span></div>
+  {% else %}
+  <p class="small-note">
+    {% if hive.state == 'failed' %}
+    <strong>{{ hive.error_code }}</strong> {{ hive.error_message or "" }}
+    {% else %}
+    {{ hive.key_count }} keys, {{ hive.value_count }} values
+    {% if hive.amcache_count %}, {{ hive.amcache_count }} Amcache records{% endif %}.
+    Parser <code>{{ hive.parser_version }}</code>.
+    {% endif %}
+  </p>
+  {% if hive.transaction_logs %}
+  <p class="small-note muted">Transaction logs detected: {{ hive.transaction_logs|join(", ") }} (not replayed).</p>
+  {% endif %}
+  {% if hive.warnings %}
+  <ul class="small-note muted">
+    {% for warning in hive.warnings[:6] %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <div class="entry-actions">
+    {% if hive.state in ('ready', 'partial') %}
+    <button type="button" class="tree-btn"
+            hx-get="/registry/hives/{{ hive.hive_id }}"
+            hx-target="#tab-content" hx-swap="innerHTML">Open hive</button>
+    {% endif %}
+    {% if hive.hive_id and hive.evidence_id %}
+    <form hx-post="/evidence/{{ hive.evidence_id }}/registry/{{ hive.entry_id }}/index"
+          hx-target="closest .registry-status" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="rebuild" value="1">
+      <button type="submit" class="tree-btn">Rebuild</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if hive.warnings and hive.state == 'ready' %}
+  <div class="alert warn small-note">{{ hive.warnings[0] }}</div>
+  {% endif %}
+</div>
+{% endif %}

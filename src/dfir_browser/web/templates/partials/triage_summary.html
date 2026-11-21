@@ -1,0 +1,25 @@
+<p class="small-note triage-latest">
+  {% if latest_triage %}
+  Latest job <code>{{ latest_triage.job_id }}</code>
+  ({{ latest_triage.created_at }}{% if latest_triage.cached %}, cached{% endif %})
+  <button type="button" class="tree-btn"
+          hx-get="/triage/jobs/{{ latest_triage.job_id }}"
+          hx-target="#triage-job-{{ latest_triage.entry_id }}"
+          hx-swap="innerHTML">View latest result</button>
+  {% else %}
+  No triage job has been run for this file yet.
+  {% endif %}
+</p>
+<form class="extract-form triage-start-form"
+      hx-post="{{ summary_form_action or ('/evidence/' ~ record.evidence_id ~ '/entries/' ~ entry.entry_id ~ '/triage') }}"
+      hx-target="#triage-job-{{ entry.entry_id }}" hx-swap="innerHTML">
+  <input type="hidden" name="csrf_token" value="{{ summary_csrf_token or csrf_token }}">
+  <label for="triage_case_{{ entry.entry_id }}">Case ID</label>
+  <input id="triage_case_{{ entry.entry_id }}" name="case_id" type="text"
+         value="case01" required
+         pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,63}">
+  <button type="submit" name="force" value="0">Run static triage</button>
+  {% if latest_triage %}
+  <button type="submit" name="force" value="1" class="secondary">Run again</button>
+  {% endif %}
+</form>

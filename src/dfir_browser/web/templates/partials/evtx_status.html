@@ -1,0 +1,58 @@
+{% if not log %}
+<div class="alert error" role="alert">
+  EVTX index job is unavailable. {{ start_error or "" }}
+</div>
+{% else %}
+<div class="registry-status evtx-status" data-state="{{ log.status }}"
+  {% if log.status in ('queued','running') %}
+  hx-get="/event-logs/{{ log.log_id }}/status"
+  hx-trigger="every 1s" hx-swap="outerHTML"
+  {% endif %}>
+  {% if start_error %}
+  <div class="alert error" role="alert">{{ start_error }}</div>
+  {% endif %}
+  <div class="triage-status-line">
+    <span class="badge {% if log.status == 'ready' %}ok{% elif log.status == 'partial' %}unalloc{% elif log.status in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">{{ log.status }}</span>
+    <span class="badge kind">phase: {{ log.phase }}</span>
+    {% if log.deleted %}<span class="badge deleted">deleted</span>{% endif %}
+    {% if cached %}<span class="badge ok">cached</span>{% endif %}
+  </div>
+  {% if log.status in ('queued','running') %}
+  <p class="muted small-note">
+    Indexing <code>{{ log.filename }}</code> ({{ log.phase }}). Parsing is
+    read-only and offline.
+  </p>
+  <div class="triage-progress"><span></span></div>
+  {% else %}
+  <p class="small-note">
+    {% if log.status == 'failed' %}
+    <strong>{{ log.error_code }}</strong> {{ log.error_message or "" }}
+    {% else %}
+    {{ log.records_indexed }} / {{ log.records_seen }} records indexed,
+    {{ log.parse_errors }} parse errors.
+    {% if log.first_event_time %}<br>Range {{ log.first_event_time }} → {{ log.last_event_time }}{% endif %}
+    {% endif %}
+  </p>
+  {% if log.warnings %}
+  <ul class="small-note muted">
+    {% for warning in log.warnings[:5] %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <div class="entry-actions">
+    {% if log.status in ('ready', 'partial') %}
+    <button type="button" class="tree-btn"
+            hx-get="/event-logs/{{ log.log_id }}"
+            hx-target="#tab-content" hx-swap="innerHTML">Open log</button>
+    {% endif %}
+    {% if log.evidence_id %}
+    <form hx-post="/evidence/{{ log.evidence_id }}/event-logs/{{ log.entry_id }}/index"
+          hx-target="closest .evtx-status" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="rebuild" value="1">
+      <button type="submit" class="tree-btn">Rebuild</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

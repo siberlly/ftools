@@ -1,0 +1,23 @@
+{% if error %}
+<div class="alert error" role="alert">{{ error }}</div>
+{% else %}
+<div class="alert success">
+  <p><strong>Extraction complete.</strong> <span class="badge unalloc">untrusted</span></p>
+  <dl>
+    <dt>Evidence</dt><dd><code>{{ result.evidence_id }}</code></dd>
+    <dt>MFT entry</dt><dd>{{ result.inode }}</dd>
+    <dt>Name</dt><dd>{{ result.name or "(unnamed)" }}</dd>
+    <dt>Case</dt><dd><code>{{ result.case_id }}</code></dd>
+    <dt>Output</dt><dd><code>{{ result.relative_path }}</code></dd>
+    <dt>Size</dt><dd>{{ result.size|filesize }} ({{ result.size }} bytes)</dd>
+    <dt>SHA-256</dt><dd><code class="hash">{{ result.sha256 }}</code></dd>
+    <dt>Tool</dt><dd>{{ result.tool_version or "unknown" }}</dd>
+    <dt>Extracted</dt><dd>{{ result.extracted_at }}</dd>
+  </dl>
+  {% if result.warnings %}
+  <ul class="warnings">
+    {% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}

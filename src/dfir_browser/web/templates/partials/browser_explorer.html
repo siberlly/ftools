@@ -1,0 +1,55 @@
+<div class="browser-explorer" data-browser-explorer data-artifact-id="{{ artifact.artifact_id }}" data-evidence-id="{{ record.evidence_id }}">
+  <div class="detail-head">
+    <h2>Browser artifacts · {{ artifact.browser }}</h2>
+    <span class="muted">{{ artifact.filename }}</span>
+  </div>
+  <p class="muted small-note">
+    {{ artifact.evidence_path }} · backend {{ artifact.backend }} ·
+    schema v{{ artifact.schema_version }} ·
+    indexed {{ artifact.records_indexed }} of {{ artifact.records_seen }} records
+    {% if artifact.errors %}· {{ artifact.parse_errors }} parse errors{% endif %}
+  </p>
+  {% if artifact.warnings %}
+  <ul class="small-note muted">
+    {% for warning in artifact.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <div class="browser-views" role="tablist" aria-label="Browser record views" data-browser-tablist>
+    <button type="button" role="tab" id="btab-downloads" class="tab active"
+            aria-selected="true" aria-controls="browser-records" tabindex="0"
+            data-browser-tab="downloads">Downloads</button>
+    <button type="button" role="tab" id="btab-history" class="tab"
+            aria-selected="false" aria-controls="browser-records" tabindex="-1"
+            data-browser-tab="history">History</button>
+    <button type="button" role="tab" id="btab-cache" class="tab"
+            aria-selected="false" aria-controls="browser-records" tabindex="-1"
+            data-browser-tab="cache">Cache</button>
+    <button type="button" role="tab" id="btab-profiles" class="tab"
+            aria-selected="false" aria-controls="browser-records" tabindex="-1"
+            data-browser-tab="profiles">Profiles</button>
+    <button type="button" role="tab" id="btab-search" class="tab"
+            aria-selected="false" aria-controls="browser-records" tabindex="-1"
+            data-browser-tab="search">Search all</button>
+  </div>
+
+  <div id="browser-records" class="browser-records" role="tabpanel"
+       aria-labelledby="btab-downloads" tabindex="0"
+       hx-get="/evidence/{{ record.evidence_id }}/browser/downloads?artifact_id={{ artifact.artifact_id }}"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p class="muted">Loading downloads…</p>
+  </div>
+
+  <div id="browser-detail" class="browser-detail-slot">
+    <div class="tree-placeholder">
+      <h3>Record detail</h3>
+      <p class="muted small-note">Choose a record to see its structured fields.</p>
+    </div>
+  </div>
+
+  <div class="browser-summary-slot"
+       hx-get="/evidence/{{ record.evidence_id }}/browser/summary?artifact_id={{ artifact.artifact_id }}"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p class="muted">Loading activity summary…</p>
+  </div>
+</div>

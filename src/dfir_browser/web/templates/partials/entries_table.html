@@ -1,0 +1,114 @@
+<div class="entries-result">
+  <div class="result-head">
+    {% if mode == "all" %}<h2>{{ title }}</h2>{% endif %}
+    <span class="muted">
+      {{ result.total }} matching entries &middot; page {{ result.page }} of {{ result.pages or 1 }}
+    </span>
+  </div>
+
+  {% if result.warning %}
+  <div class="alert warn">
+    <strong>Index warning.</strong> {{ result.warning }}
+  </div>
+  {% endif %}
+  {% if not result.complete %}
+  <div class="alert error">
+    <strong>INCOMPLETE INDEX.</strong> Results may be missing entries. Use the
+    Filesystem index card above to rebuild.
+  </div>
+  {% endif %}
+
+  {% if result.results %}
+  <div class="table-wrap">
+    <table class="listing entries-table">
+      <thead>
+        <tr>
+          <th>
+            {% set path_url = result.sort_urls.get("path") %}
+            {% if path_url %}<a href="#" hx-get="{{ path_url }}" hx-target="#tab-content" hx-swap="innerHTML">Full path{% if result.sort == "path" %} {{ "↑" if result.sort_dir == "asc" else "↓" }}{% endif %}</a>{% else %}Full path{% endif %}
+          </th>
+          <th>
+            {% set name_url = result.sort_urls.get("basename") %}
+            {% if name_url %}<a href="#" hx-get="{{ name_url }}" hx-target="#tab-content" hx-swap="innerHTML">Name{% if result.sort == "basename" %} {{ "↑" if result.sort_dir == "asc" else "↓" }}{% endif %}</a>{% else %}Name{% endif %}
+          </th>
+          <th>Type</th>
+          <th>
+            {% set size_url = result.sort_urls.get("size") %}
+            {% if size_url %}<a href="#" hx-get="{{ size_url }}" hx-target="#tab-content" hx-swap="innerHTML">Size{% if result.sort == "size" %} {{ "↑" if result.sort_dir == "asc" else "↓" }}{% endif %}</a>{% else %}Size{% endif %}
+          </th>
+          <th class="num">MFT</th>
+          <th>
+            {% set mod_url = result.sort_urls.get("modified") %}
+            {% if mod_url %}<a href="#" hx-get="{{ mod_url }}" hx-target="#tab-content" hx-swap="innerHTML">Modified (UTC){% if result.sort == "modified" %} {{ "↑" if result.sort_dir == "asc" else "↓" }}{% endif %}</a>{% else %}Modified (UTC){% endif %}
+          </th>
+          <th>
+            {% set created_url = result.sort_urls.get("created") %}
+            {% if created_url %}<a href="#" hx-get="{{ created_url }}" hx-target="#tab-content" hx-swap="innerHTML">Created (UTC){% if result.sort == "created" %} {{ "↑" if result.sort_dir == "asc" else "↓" }}{% endif %}</a>{% else %}Created (UTC){% endif %}
+          </th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in result.results %}
+        <tr class="{% if entry.deleted %}deleted{% endif %}">
+          <td class="name"><code>{{ entry.full_path }}</code></td>
+          <td>{{ entry.basename }}</td>
+          <td>{{ entry.entry_type }}</td>
+          <td>{% if entry.size is not none %}{{ entry.size|filesize }}{% endif %}</td>
+          <td class="num">{{ entry.inode if entry.inode is not none else "" }}</td>
+          <td class="nowrap">{{ entry.modified_time or "" }}</td>
+          <td class="nowrap">{{ entry.created_time or "" }}</td>
+          <td class="nowrap">
+            {% if entry.deleted %}
+              <span class="badge deleted">DELETED / UNALLOCATED</span>
+            {% else %}
+              <span class="badge ok">allocated</span>
+            {% endif %}
+          </td>
+          <td class="nowrap">
+            {% if entry.inode %}
+            <div class="entry-actions">
+              {% if mode in ("search", "deleted") %}
+              <button type="button" class="link" data-reveal-entry="{{ entry.id }}"
+                      title="Open Browse and reveal this node in the tree">Reveal in tree</button>
+              {% endif %}
+              <button type="button" class="link"
+                      hx-get="/evidence/{{ evidence_id }}/stat/{{ entry.inode }}"
+                      hx-target="#detail" hx-swap="innerHTML">Metadata</button>
+              <button type="button" class="link"
+                      hx-get="/evidence/{{ evidence_id }}/entries/{{ entry.id }}/triage/panel"
+                      hx-target="#detail" hx-swap="innerHTML"
+                      title="Run read-only static triage on an extracted copy">Triage</button>
+              <button type="button" class="link"
+                      hx-get="/evidence/{{ evidence_id }}/stat/{{ entry.inode }}?focus=extract"
+                      hx-target="#detail" hx-swap="innerHTML"
+                      title="Open metadata and the explicit extract form">Extract…</button>
+            </div>
+            {% else %}
+            <span class="muted">n/a</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    {% if result.prev_url %}
+    <button type="button" class="tab"
+            hx-get="{{ result.prev_url }}" hx-target="#tab-content"
+            hx-swap="innerHTML">&larr; Previous</button>
+    {% endif %}
+    <span class="muted">Page {{ result.page }} of {{ result.pages or 1 }}</span>
+    {% if result.next_url %}
+    <button type="button" class="tab"
+            hx-get="{{ result.next_url }}" hx-target="#tab-content"
+            hx-swap="innerHTML">Next &rarr;</button>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No matching entries.</p>
+  {% endif %}
+</div>

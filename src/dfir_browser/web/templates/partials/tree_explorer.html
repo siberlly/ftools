@@ -1,0 +1,95 @@
+{% set tree_root_label = record.layout.details.volume_name or "Evidence volume" %}
+<div class="tree-explorer"
+     data-evidence-id="{{ record.evidence_id }}"
+     data-include-deleted="{{ '1' if include_deleted else '0' }}"
+     data-directories-only="{{ '1' if directories_only else '0' }}"
+     data-selected-id="{% if selected and selected.entry_id is defined %}{{ selected.entry_id }}{% endif %}"
+     data-root-label="{{ tree_root_label }}">
+  <div class="tree-toolbar" role="toolbar" aria-label="Tree controls">
+    <button type="button" class="tree-btn" data-tree-action="toggle-sidebar"
+            aria-controls="tree-pane" aria-expanded="true"
+            title="Show or hide the tree panel">Tree</button>
+    <label class="tree-filter">
+      <span class="tree-filter-label">Filter tree</span>
+      <input type="search" data-tree-filter maxlength="128"
+             placeholder="filter loaded nodes" autocomplete="off"
+             aria-label="Filter tree nodes already loaded">
+    </label>
+    <button type="button" class="tree-btn" data-tree-action="collapse-all">
+      Collapse all
+    </button>
+    <button type="button" class="tree-btn" data-tree-action="root">
+      Go to root
+    </button>
+    <label class="tree-toggle">
+      <input type="checkbox" data-tree-toggle="include-deleted"
+             {% if include_deleted %}checked{% endif %}>
+      Show deleted entries
+    </label>
+    <label class="tree-toggle">
+      <input type="checkbox" data-tree-toggle="directories-only"
+             {% if directories_only %}checked{% endif %}>
+      Directories only
+    </label>
+  </div>
+
+  <div class="tree-breadcrumb" data-tree-breadcrumb aria-live="polite">
+    <span class="muted">Select a node to see its path.</span>
+  </div>
+
+  <div class="tree-split" data-tree-split>
+    <div class="tree-pane" id="tree-pane">
+      <div class="tree-pane-head">
+        <span class="tree-root-title">{{ tree_root_label }}</span>
+        <span class="tree-root-kind">NTFS volume</span>
+      </div>
+      <div class="tree-scroll" data-tree-scroll>
+        <div class="tree" role="tree" aria-label="Evidence filesystem tree"
+             data-tree-root="1" aria-multiselectable="false">
+          <div class="tree-node tree-root" role="treeitem"
+               data-entry-id="0" data-has-children="1" data-entry-type="directory"
+               data-load-url="/evidence/{{ record.evidence_id }}/tree/children?parent_id=0&amp;include_deleted={{ '1' if include_deleted else '0' }}&amp;directories_only={{ '1' if directories_only else '0' }}"
+               aria-expanded="true" aria-level="1"
+               aria-label="{{ tree_root_label }}, volume root">
+            <div class="tree-row" data-tree-row>
+              <button type="button" class="tree-chevron" data-tree-chevron
+                      aria-label="Collapse {{ tree_root_label }}" tabindex="-1">
+                <span class="chevron-glyph" aria-hidden="true">&#9656;</span>
+              </button>
+              <span class="tree-icon tree-icon-volume" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="14" height="14" role="img" aria-hidden="true">
+                  <rect x="1" y="3" width="14" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                  <rect x="3" y="10" width="10" height="3.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                </svg>
+              </span>
+              <span class="tree-name" data-tree-name>{{ tree_root_label }}</span>
+              <span class="tree-badges">
+                <span class="badge ok">allocated</span>
+                <span class="badge kind">volume</span>
+              </span>
+            </div>
+            <div class="tree-group" role="group" data-tree-group aria-busy="true">
+              <div class="tree-loading">Loading root entries…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree-resizer" data-tree-resizer role="separator"
+         aria-orientation="vertical" aria-label="Resize tree panel"
+         tabindex="0"></div>
+
+    <div class="tree-detail" id="tree-detail" aria-live="polite">
+      <div class="tree-placeholder">
+        <h3>Evidence browser</h3>
+        <p class="muted">
+          Expand a directory to load its direct children from the SQLite index.
+          Selecting a directory shows its children; selecting a file shows
+          metadata and the extract form. All names and paths are untrusted
+          evidence data.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>

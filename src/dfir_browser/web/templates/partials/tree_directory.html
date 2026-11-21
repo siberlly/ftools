@@ -1,0 +1,116 @@
+{% set entry = entry %}
+<div class="dir-panel">
+  <header class="dir-panel-head">
+    <div>
+      <h3 class="dir-panel-title">{{ entry.name }}</h3>
+      <p class="muted path-line"><code>{{ entry.path }}</code></p>
+    </div>
+    <div class="dir-panel-badges">
+      {% if entry.deleted %}
+        <span class="badge deleted">deleted</span>
+      {% else %}
+        <span class="badge ok">allocated</span>
+      {% endif %}
+      <span class="badge kind">directory</span>
+    </div>
+  </header>
+
+  <p class="muted small-note">
+    Direct children from the SQLite filesystem index. {{ page.total }} entries.
+    Filenames, paths and timestamps are untrusted evidence data.
+  </p>
+
+  {% if page.warning %}
+  <div class="alert warn">{{ page.warning }}</div>
+  {% endif %}
+  {% if not page.complete %}
+  <div class="alert error">
+    <strong>INCOMPLETE INDEX.</strong> This listing may be missing entries.
+  </div>
+  {% endif %}
+
+  <div class="dir-actions">
+    <button type="button" class="tree-btn"
+            data-tree-sort="path" data-sort-dir="{{ 'desc' if page.sort == 'path' and page.sort_dir == 'asc' else 'asc' }}">
+      Name {{ "↑" if page.sort == "path" and page.sort_dir == "asc" else ("↓" if page.sort == "path" else "") }}
+    </button>
+    <button type="button" class="tree-btn"
+            data-tree-sort="type" data-sort-dir="{{ 'desc' if page.sort == 'type' and page.sort_dir == 'asc' else 'asc' }}">
+      Type {{ "↑" if page.sort == "type" and page.sort_dir == "asc" else ("↓" if page.sort == "type" else "") }}
+    </button>
+    <button type="button" class="tree-btn"
+            data-tree-sort="size" data-sort-dir="{{ 'desc' if page.sort == 'size' and page.sort_dir == 'asc' else 'asc' }}">
+      Size {{ "↑" if page.sort == "size" and page.sort_dir == "asc" else ("↓" if page.sort == "size" else "") }}
+    </button>
+    <button type="button" class="tree-btn"
+            data-tree-sort="modified" data-sort-dir="{{ 'desc' if page.sort == 'modified' and page.sort_dir == 'asc' else 'asc' }}">
+      Modified {{ "↑" if page.sort == "modified" and page.sort_dir == "asc" else ("↓" if page.sort == "modified" else "") }}
+    </button>
+    <button type="button" class="tree-btn"
+            data-tree-sort="status" data-sort-dir="{{ 'desc' if page.sort == 'status' and page.sort_dir == 'asc' else 'asc' }}">
+      Status {{ "↑" if page.sort == "status" and page.sort_dir == "asc" else ("↓" if page.sort == "status" else "") }}
+    </button>
+  </div>
+
+  <div class="table-wrap dir-table-wrap">
+    <table class="listing compact dir-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Type</th><th>Size</th><th class="num">MFT</th>
+          <th>Modified (UTC)</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for child in page.children %}
+        <tr class="{% if child.deleted %}deleted{% endif %}">
+          <td class="name">
+            <button type="button" class="link"
+                    data-tree-open-id="{{ child.entry_id }}"
+                    title="{{ child.path }} &#10;MFT entry: {{ child.inode if child.inode is not none else 'unknown' }} &#10;Status: {{ child.status }}"
+                    >{{ child.name }}</button>
+          </td>
+          <td>
+            {% if child.entry_type == "directory" %}
+              <span class="tree-inline-icon" aria-hidden="true">&#128193;</span> dir
+            {% else %}
+              <span class="tree-inline-icon" aria-hidden="true">&#128196;</span> file
+            {% endif %}
+          </td>
+          <td>{{ child.size|filesize }}</td>
+          <td class="num">{{ child.inode if child.inode is not none else "" }}</td>
+          <td class="nowrap">{{ child.modified_time or "unknown" }}</td>
+          <td class="nowrap">
+            {% if child.deleted %}
+              <span class="badge deleted">DELETED</span>
+            {% elif child.allocated %}
+              <span class="badge ok">allocated</span>
+            {% else %}
+              <span class="badge unalloc">unallocated</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not page.children %}
+        <tr><td colspan="6" class="muted">This directory is empty or has no loadable children.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    {% if page.prev_url %}
+    <button type="button" class="tree-btn" data-tree-nav="{{ page.prev_url }}">
+      &larr; Previous
+    </button>
+    {% endif %}
+    <span class="muted">Page {{ page.page }} of {{ page.pages or 1 }}</span>
+    {% if page.next_url %}
+    <button type="button" class="tree-btn" data-tree-nav="{{ page.next_url }}">
+      Next &rarr;
+    </button>
+    {% endif %}
+    <a class="tree-link" href="/evidence/{{ page.evidence_id }}/entries?path={{ entry.path|urlencode }}">
+      Open recursive table
+    </a>
+  </div>
+</div>

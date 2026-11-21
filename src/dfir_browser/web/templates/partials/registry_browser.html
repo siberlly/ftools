@@ -1,0 +1,126 @@
+{% set hive = hive %}
+<div class="registry-explorer" data-hive-id="{{ hive.hive_id }}"
+     data-root-key-id="{{ root.key_id }}">
+  <div class="detail-head">
+    <h2>Registry: {{ hive.name }}</h2>
+    <span class="badge kind">{{ hive.hive_type }}</span>
+    {% if hive.owner %}<span class="badge kind">profile: {{ hive.owner }}</span>{% endif %}
+    {% if hive.dirty %}<span class="badge unalloc">dirty</span>{% endif %}
+    {% if hive.sensitive %}<span class="badge unalloc">sensitive</span>{% endif %}
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ hive.evidence_id }}/registry"
+            hx-target="#tab-content" hx-swap="innerHTML">&larr; Hives</button>
+    {% if record %}
+    <button type="button" class="tree-btn" data-reveal-entry="{{ hive.entry_id }}"
+            title="Reveal the hive file in the filesystem tree">Reveal hive in tree</button>
+    {% endif %}
+  </div>
+  <p class="muted small-note">
+    <code>{{ hive.path }}</code> &middot; {{ hive.key_count }} keys &middot;
+    {{ hive.value_count }} values &middot; MFT {{ hive.inode if hive.inode is not none else "unknown" }}
+    &middot; parser <code>{{ hive.parser_version }}</code>
+    &middot; SHA-256 <code class="hash">{{ hive.sha256 or "n/a" }}</code>
+  </p>
+  {% if hive.sensitive %}
+  <div class="alert warn">
+    <strong>Sensitive hive.</strong> Metadata browsing only. Credential
+    material is not decrypted or extracted.
+  </div>
+  {% endif %}
+  {% if hive.warnings %}
+  <div class="alert warn small-note">
+    <ul>{% for warning in hive.warnings[:5] %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="tree-toolbar registry-toolbar" role="toolbar" aria-label="Registry tree controls">
+    <label class="tree-filter">
+      <span class="tree-filter-label">Filter keys</span>
+      <input type="search" data-registry-filter maxlength="128"
+             placeholder="filter loaded keys" autocomplete="off">
+    </label>
+    <button type="button" class="tree-btn" data-registry-action="collapse">Collapse all</button>
+    <button type="button" class="tree-btn" data-registry-action="root">Go to root</button>
+  </div>
+
+  <div class="tree-breadcrumb" data-registry-breadcrumb aria-live="polite">
+    <span class="muted">Select a key to see its path.</span>
+  </div>
+
+  <div class="tree-split registry-split">
+    <div class="tree-pane">
+      <div class="tree-pane-head">
+        <span class="tree-root-title">{{ hive.name }}</span>
+        <span class="tree-root-kind">{{ hive.hive_type }}</span>
+      </div>
+      <div class="tree-scroll" data-registry-scroll>
+        <div class="tree" role="tree" aria-label="Registry key tree"
+             data-registry-tree>
+          <div class="tree-node tree-root" role="treeitem"
+               data-key-id="{{ root.key_id }}" data-has-children="{{ '1' if root.has_children else '0' }}"
+               aria-level="1" aria-expanded="true"
+               aria-label="Hive root {{ hive.name }}">
+            <div class="tree-row" data-registry-row tabindex="-1">
+              <button type="button" class="tree-chevron" data-registry-chevron
+                      aria-label="Collapse hive root" tabindex="-1">
+                <span class="chevron-glyph" aria-hidden="true">&#9662;</span>
+              </button>
+              <span class="tree-icon" aria-hidden="true">&#128193;</span>
+              <span class="tree-name" data-registry-name>Hive root</span>
+              <span class="tree-badges"><span class="badge kind">root</span></span>
+            </div>
+            <div class="tree-group" role="group" data-registry-group aria-busy="true">
+              <div class="tree-loading">Loading registry keys…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tree-resizer" data-registry-resizer role="separator"
+         aria-orientation="vertical" aria-label="Resize registry tree" tabindex="0"></div>
+    <div class="tree-detail" id="registry-detail" aria-live="polite">
+      <div class="tree-placeholder">
+        <h3>Registry browser</h3>
+        <p class="muted small-note">
+          Expand a key to load its direct subkeys from the SQLite registry index.
+          Selecting a key shows its values. All key names, paths and values are
+          untrusted evidence data.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <section class="triage-block registry-search-block">
+    <h3>Search registry</h3>
+    <form class="filter-form" hx-get="/registry/hives/{{ hive.hive_id }}/search"
+          hx-target="#registry-search-results" hx-swap="innerHTML"
+          data-search-form>
+      <label>Query
+        <input type="text" name="q" maxlength="256" required
+               placeholder="key name, value name or string">
+      </label>
+      <label class="checkbox-label"><input type="checkbox" name="keys" value="1" checked> Key names</label>
+      <label class="checkbox-label"><input type="checkbox" name="value_names" value="1" checked> Value names</label>
+      <label class="checkbox-label"><input type="checkbox" name="strings" value="1" checked> String values</label>
+      <label class="checkbox-label"><input type="checkbox" name="exact" value="1"> Exact</label>
+      <button type="submit" data-search-submit>Search</button>
+      <span class="htmx-indicator muted small-note" role="status">Searching…</span>
+    </form>
+    <div id="registry-search-results" aria-live="polite"></div>
+  </section>
+
+  {% if hive.amcache_count %}
+  <section class="triage-block registry-amcache-block">
+    <h3>Amcache records</h3>
+    <p class="muted small-note">
+      Executable inventory parsed from this hive. FileId is preserved raw; a
+      hash is normalized only when the format is unambiguous.
+    </p>
+    <div id="amcache-results">
+      {% with result = None, form = {'q': '', 'exact': False}, hive_id = hive.hive_id, vt_configured = vt_configured %}
+        {% include "partials/registry_amcache.html" %}
+      {% endwith %}
+    </div>
+  </section>
+  {% endif %}
+</div>

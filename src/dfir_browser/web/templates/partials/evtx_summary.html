@@ -1,0 +1,93 @@
+{% set s = summary %}
+<div class="evtx-summary">
+  <div class="summary-grid">
+    <div class="stat"><span class="stat-label">Events</span><span class="stat-value">{{ s.total_events }}</span></div>
+    <div class="stat"><span class="stat-label">From</span><span class="stat-value small">{{ s.time_from or "n/a" }}</span></div>
+    <div class="stat"><span class="stat-label">To</span><span class="stat-value small">{{ s.time_to or "n/a" }}</span></div>
+    <div class="stat"><span class="stat-label">Logs</span><span class="stat-value">{{ s.log_ids|length }}</span></div>
+  </div>
+
+  {% set groups = [
+    ("By channel", s.by_channel),
+    ("By provider", s.by_provider),
+    ("By event ID", s.by_event_id),
+    ("By level", s.by_level),
+    ("By user SID", s.by_user_sid),
+    ("By computer", s.by_computer),
+    ("By day (UTC)", s.by_day)
+  ] %}
+  <div class="evtx-summary-groups">
+    {% for title, values in groups %}
+    <section class="triage-block">
+      <h4>{{ title }}</h4>
+      {% if values %}
+      <div class="table-wrap">
+        <table class="listing compact">
+          <thead><tr><th>Value</th><th class="num">Count</th></tr></thead>
+          <tbody>
+            {% for key, count in values.items() %}
+            <tr><td class="name small-note"><code>{{ key }}</code></td><td class="num">{{ count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted small-note">No data.</p>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+
+  {% if s.top_processes or s.top_paths %}
+  <section class="triage-block">
+    <h4>Top structured process / path values</h4>
+    <div class="evtx-summary-groups">
+      <div class="table-wrap">
+        <table class="listing compact">
+          <thead><tr><th>Process / image</th><th class="num">Count</th></tr></thead>
+          <tbody>
+            {% for item in s.top_processes %}
+            <tr><td class="name small-note"><code>{{ item.value }}</code></td><td class="num">{{ item.count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <table class="listing compact">
+          <thead><tr><th>Path / command line</th><th class="num">Count</th></tr></thead>
+          <tbody>
+            {% for item in s.top_paths %}
+            <tr><td class="name small-note"><code>{{ item.value }}</code></td><td class="num">{{ item.count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="triage-block">
+    <h4>Notable activity rules</h4>
+    {% if s.notable %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Rule</th><th>Preset</th><th class="num">Count</th><th>Reason</th><th>Limitations</th></tr></thead>
+        <tbody>
+          {% for item in s.notable %}
+          <tr>
+            <td><code>{{ item.rule_id }}</code></td>
+            <td class="small-note">{{ item.name }}</td>
+            <td class="num">{{ item.count }}</td>
+            <td class="small-note">{{ item.reason }}</td>
+            <td class="small-note muted">{{ item.limitations }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted small-note">No notable-activity rule matched in the selected logs.</p>
+    {% endif %}
+    <p class="muted small-note">{{ s.note }}</p>
+  </section>
+</div>

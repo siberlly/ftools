@@ -1,0 +1,55 @@
+<div class="detail-panel browser-summary">
+  <div class="detail-head">
+    <h3>Activity summary</h3>
+    <span class="muted small-note">
+      {{ summary.time_from or "—" }} → {{ summary.time_to or "—" }}
+    </span>
+  </div>
+  <div class="stat-grid">
+    <div class="stat"><span class="stat-value">{{ summary.total_visits }}</span><span class="stat-label">Visits</span></div>
+    <div class="stat"><span class="stat-value">{{ summary.total_downloads }}</span><span class="stat-label">Downloads</span></div>
+    <div class="stat"><span class="stat-value">{{ summary.total_cache }}</span><span class="stat-label">Cache records</span></div>
+    <div class="stat"><span class="stat-value">{{ summary.executable_downloads }}</span><span class="stat-label">Exe/archive downloads</span></div>
+    <div class="stat"><span class="stat-value">{{ summary.total_download_bytes|filesize }}</span><span class="stat-label">Download bytes</span></div>
+  </div>
+
+  <div class="browser-summary-columns">
+    <section>
+      <h4>Users</h4>
+      <ul class="small-note">
+        {% for name, count in summary.users.items() %}<li>{{ name }} · {{ count }}</li>{% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+      <h4>Browsers</h4>
+      <ul class="small-note">
+        {% for name, count in summary.browsers.items() %}<li>{{ name }} · {{ count }}</li>{% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+      <h4>Download states</h4>
+      <ul class="small-note">
+        {% for name, count in summary.download_states.items() %}<li>{{ name }} · {{ count }}</li>{% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+    </section>
+    <section>
+      <h4>Top domains</h4>
+      <ul class="small-note">
+        {% for item in summary.top_domains %}<li>{{ item.domain }} · {{ item.count }}</li>{% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+      <h4>Top downloaded extensions</h4>
+      <ul class="small-note">
+        {% for item in summary.top_extensions %}<li>.{{ item.extension }} · {{ item.count }}</li>{% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+    </section>
+    <section>
+      <h4>Notable executable downloads</h4>
+      <ul class="small-note">
+        {% for item in summary.notable %}
+        <li>
+          <code>{{ item.filename or "—" }}</code>
+          <div class="muted">{{ item.start_time_utc or "" }} · {{ item.state or "" }}</div>
+          <div class="muted browser-url">{{ item.url or "" }}</div>
+        </li>
+        {% else %}<li class="muted">—</li>{% endfor %}
+      </ul>
+    </section>
+  </div>
+  <p class="muted small-note">{{ summary.note }}</p>
+</div>

@@ -1,0 +1,27 @@
+<div class="browser-table-view" data-browser-view="profiles">
+  {% if error %}<p class="badge deleted">{{ error }}</p>{% endif %}
+  {% if result %}
+  <p class="muted small-note">{{ result.total }} profile(s)</p>
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead><tr><th>Profile</th><th>User</th><th>Browser</th><th>Name</th><th>Source</th><th>Artifacts</th></tr></thead>
+      <tbody>
+        {% for item in result.items %}
+        <tr>
+          <td class="small-note"><code>{{ item.profile_id }}</code></td>
+          <td class="name">{{ item.user or "—" }}</td>
+          <td class="small-note">{{ item.browser }}</td>
+          <td class="small-note">{{ item.profile_name or "default" }}</td>
+          <td class="small-note"><code>{{ item.source_path }}</code></td>
+          <td class="small-note">{{ item.artifact_types|join(", ") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No indexed browser profiles yet.</p>
+  {% endif %}
+  {% endif %}
+</div>

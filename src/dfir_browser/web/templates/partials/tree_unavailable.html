@@ -1,0 +1,12 @@
+<div class="tree-unavailable">
+  <h3>Filesystem index required</h3>
+  <div class="alert warn">
+    The explorer tree needs a queryable filesystem index. Current status:
+    <strong>{{ status.status }}</strong>{% if status.stale %} (stale){% endif %}.
+  </div>
+  {% if status.warning %}<div class="alert warn">{{ status.warning }}</div>{% endif %}
+  <p class="muted">
+    Use the index card above to build or rebuild the index. Browse falls back to
+    a live listing while the index is unavailable.
+  </p>
+</div>

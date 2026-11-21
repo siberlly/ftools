@@ -1,0 +1,60 @@
+{% set strings_page = strings %}
+<div class="triage-block triage-strings" id="triage-strings-{{ strings_page.job_id }}">
+  <h4>Extracted strings</h4>
+  <p class="muted small-note">
+    {{ strings_page.total }} stored strings
+    {% if strings_page.encoding %}(encoding: {{ strings_page.encoding }}){% endif %}
+    {% if strings_page.query %}(filter: <code>{{ strings_page.query }}</code>){% endif %}.
+    Values are evidence data and are escaped as text.
+  </p>
+  <form class="filter-form triage-string-filter"
+        hx-get="/triage/jobs/{{ strings_page.job_id }}/strings"
+        hx-target="#triage-strings-{{ strings_page.job_id }}"
+        hx-swap="outerHTML">
+    <label>Filter
+      <input type="text" name="q" value="{{ strings_page.query or '' }}" maxlength="128"
+             placeholder="filter strings">
+    </label>
+    <label>Encoding
+      <select name="encoding">
+        <option value="" {% if not strings_page.encoding %}selected{% endif %}>Any</option>
+        <option value="ascii" {% if strings_page.encoding == "ascii" %}selected{% endif %}>ASCII</option>
+        <option value="utf-16le" {% if strings_page.encoding == "utf-16le" %}selected{% endif %}>UTF-16LE</option>
+      </select>
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+
+  {% if strings_page.strings %}
+  <div class="table-wrap triage-strings-wrap">
+    <table class="listing compact">
+      <thead><tr><th class="num">Offset</th><th>Encoding</th><th>Value</th><th></th></tr></thead>
+      <tbody>
+        {% for item in strings_page.strings %}
+        <tr>
+          <td class="num">{{ item.offset }}</td>
+          <td>{{ item.encoding }}</td>
+          <td class="name"><code>{{ item.value }}</code></td>
+          <td><button type="button" class="link" data-copy-value="{{ item.value }}">Copy</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    {% if strings_page.page > 1 %}
+    <button type="button" class="tree-btn"
+            hx-get="/triage/jobs/{{ strings_page.job_id }}/strings?page={{ strings_page.page - 1 }}&page_size={{ strings_page.page_size }}{% if strings_page.encoding %}&encoding={{ strings_page.encoding }}{% endif %}{% if strings_page.query %}&q={{ strings_page.query|urlencode }}{% endif %}"
+            hx-target="#triage-strings-{{ strings_page.job_id }}" hx-swap="outerHTML">&larr; Previous</button>
+    {% endif %}
+    <span class="muted">Page {{ strings_page.page }} of {{ strings_page.pages or 1 }}</span>
+    {% if strings_page.page < strings_page.pages %}
+    <button type="button" class="tree-btn"
+            hx-get="/triage/jobs/{{ strings_page.job_id }}/strings?page={{ strings_page.page + 1 }}&page_size={{ strings_page.page_size }}{% if strings_page.encoding %}&encoding={{ strings_page.encoding }}{% endif %}{% if strings_page.query %}&q={{ strings_page.query|urlencode }}{% endif %}"
+            hx-target="#triage-strings-{{ strings_page.job_id }}" hx-swap="outerHTML">Next &rarr;</button>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No stored strings match this filter.</p>
+  {% endif %}
+</div>

@@ -1,0 +1,18 @@
+{% if error %}
+<div class="alert error" role="alert">{{ error }}</div>
+{% elif compare %}
+<div class="alert {% if compare.status == 'match' %}ok{% elif compare.status == 'mismatch' %}warn{% else %}warn{% endif %}"
+     role="status">
+  <strong>Hash comparison: {{ compare.status }}</strong>
+  <dl class="file-facts">
+    <dt>Algorithm</dt><dd>{{ compare.algorithm or "unknown" }}</dd>
+    <dt>Amcache hash</dt>
+    <dd>{% if compare.amcache_hash %}<code class="hash">{{ compare.amcache_hash }}</code>{% else %}n/a{% endif %}</dd>
+    <dt>Filesystem hash</dt>
+    <dd>{% if compare.filesystem_hash %}<code class="hash">{{ compare.filesystem_hash }}</code>{% else %}n/a{% endif %}</dd>
+    <dt>Triage job</dt><dd>{{ compare.triage_job_id or "not used" }}</dd>
+  </dl>
+  <p class="small-note">{{ compare.note }}</p>
+  {% for warning in compare.warnings %}<p class="small-note muted">{{ warning }}</p>{% endfor %}
+</div>
+{% endif %}

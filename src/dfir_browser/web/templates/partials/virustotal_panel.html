@@ -1,0 +1,62 @@
+{% set status = vt_status %}
+<section class="card vt-card" id="vt-panel-{{ entry.entry_id }}"
+         data-vt-entry="{{ entry.entry_id }}">
+  <div class="detail-head">
+    <h3>VirusTotal hash lookup</h3>
+    {% if status.configured %}
+    <span class="badge ok">key configured</span>
+    {% else %}
+    <span class="badge unalloc">no API key</span>
+    {% endif %}
+  </div>
+  <p class="muted small-note">
+    Only the hash is sent to VirusTotal. The evidence file and the extracted
+    copy are never uploaded, and no filename, path, case or evidence ID is sent.
+    A lookup uses VirusTotal quota and is never automatic.
+  </p>
+
+  {% if not status.configured %}
+  <div class="alert warn">
+    <strong>VirusTotal is not configured.</strong>
+    <a href="/settings/integrations">Configure an API key</a> to enable hash
+    lookups. Static triage still works without it.
+  </div>
+  {% endif %}
+
+  <p class="small-note vt-hash-line">
+    <strong>Hash to send:</strong>
+    {% if vt_hash %}
+      <code class="hash">{{ vt_hash }}</code> <span class="badge kind">SHA-256</span>
+    {% else %}
+      <span class="muted">SHA-256 will be computed from a read-only extracted copy when you start the lookup.</span>
+    {% endif %}
+  </p>
+
+  <div class="entry-actions">
+    <form hx-post="/evidence/{{ record.evidence_id }}/entries/{{ entry.entry_id }}/virustotal"
+          hx-target="closest .vt-card" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" {% if not status.configured %}disabled{% endif %}>
+        Look up SHA-256 on VirusTotal
+      </button>
+    </form>
+    {% if vt_result %}
+    <form hx-post="/evidence/{{ record.evidence_id }}/entries/{{ entry.entry_id }}/virustotal/refresh"
+          hx-target="closest .vt-card" hx-swap="outerHTML"
+          hx-confirm="Refresh sends a new outbound request to VirusTotal and uses one quota unit.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary" {% if not status.configured %}disabled{% endif %}>
+        Refresh from VirusTotal
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="vt-result" aria-live="polite">
+    {% if vt_error %}
+      {% include "partials/virustotal_error.html" %}
+    {% elif vt_result %}
+      {% include "partials/virustotal_report.html" %}
+    {% endif %}
+  </div>
+</section>

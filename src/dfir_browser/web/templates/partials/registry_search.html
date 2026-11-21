@@ -1,0 +1,41 @@
+{% if error %}
+<div class="alert error" role="alert">{{ error }}</div>
+{% elif result %}
+<div class="registry-search-result">
+  <p class="muted small-note">{{ result.total }} results &middot; page {{ result.page }} of {{ result.pages or 1 }}</p>
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead><tr><th>Kind</th><th>Key path</th><th>Name</th><th>Type</th><th>Value</th><th></th></tr></thead>
+      <tbody>
+        {% for item in result.items %}
+        <tr>
+          <td><span class="badge {% if item.kind == 'key' %}kind{% else %}unalloc{% endif %}">{{ item.kind }}</span></td>
+          <td class="name"><code>{{ item.key_path }}</code></td>
+          <td>{{ item.name }}</td>
+          <td>{{ item.type or "" }}</td>
+          <td class="name">{% if item.value is not none %}<code>{{ item.value }}</code>{% endif %}</td>
+          <td><button type="button" class="link" data-registry-reveal="{{ item.key_id }}">Reveal in tree</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    {% if result.page > 1 %}
+    <button type="button" class="tree-btn"
+            hx-get="/registry/hives/{{ hive_id }}/search?q={{ form.q|urlencode }}&keys={{ '1' if form.keys else '0' }}&value_names={{ '1' if form.value_names else '0' }}&strings={{ '1' if form.strings else '0' }}&exact={{ '1' if form.exact else '0' }}&page={{ result.page - 1 }}"
+            hx-target="#registry-search-results" hx-swap="innerHTML">&larr; Previous</button>
+    {% endif %}
+    <span class="muted">Page {{ result.page }} of {{ result.pages or 1 }}</span>
+    {% if result.page < result.pages %}
+    <button type="button" class="tree-btn"
+            hx-get="/registry/hives/{{ hive_id }}/search?q={{ form.q|urlencode }}&keys={{ '1' if form.keys else '0' }}&value_names={{ '1' if form.value_names else '0' }}&strings={{ '1' if form.strings else '0' }}&exact={{ '1' if form.exact else '0' }}&page={{ result.page + 1 }}"
+            hx-target="#registry-search-results" hx-swap="innerHTML">Next &rarr;</button>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No registry key or value matched.</p>
+  {% endif %}
+</div>
+{% endif %}

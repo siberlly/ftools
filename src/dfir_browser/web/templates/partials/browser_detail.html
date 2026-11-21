@@ -1,0 +1,43 @@
+<div class="detail-panel browser-detail" data-browser-detail="{{ record_type }}">
+  <div class="detail-head">
+    <h3>{{ record_type|capitalize }} detail</h3>
+    <span class="badge kind">untrusted evidence data</span>
+  </div>
+  <dl class="detail-grid">
+    {% for key, value in detail.items() %}
+    {% if key not in ("trust", "url_chain", "warnings") and value is not none and value != "" %}
+    <dt>{{ key|replace("_", " ") }}</dt>
+    <dd>
+      {% if key in ("url", "final_url", "referrer", "tab_url") %}
+      <code class="browser-url">{{ value }}</code>
+      <button type="button" class="link" data-copy-value>Copy</button>
+      {% elif key == "target_path" or key == "local_path" %}
+      <code>{{ value }}</code>
+      {% else %}
+      {{ value }}
+      {% endif %}
+    </dd>
+    {% endif %}
+    {% endfor %}
+  </dl>
+
+  {% if detail.url_chain %}
+  <h4>URL chain</h4>
+  <ol class="browser-chain small-note">
+    {% for hop in detail.url_chain %}
+    <li><code class="browser-url">{{ hop }}</code></li>
+    {% endfor %}
+  </ol>
+  <p class="muted small-note">
+    Redirect chain recorded by the browser. URLs are untrusted evidence and
+    were not requested.
+  </p>
+  {% endif %}
+
+  {% if detail.warnings %}
+  <h4>Parser warnings</h4>
+  <ul class="small-note muted">
+    {% for warning in detail.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>

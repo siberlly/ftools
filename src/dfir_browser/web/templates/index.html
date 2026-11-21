@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Register evidence</h1>
+<p class="muted">
+  Register an E01, raw, or img image. Files are opened read-only by Sleuth Kit tools.
+  Allowed roots: {% for root in allowed_roots %}<code>{{ root }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+</p>
+
+{% if error %}
+<div class="alert error" role="alert">{{ error }}</div>
+{% endif %}
+
+<form class="card form" method="post" action="/evidence">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="path">Evidence path</label>
+  <input id="path" name="path" type="text" required
+         placeholder="/home/ubuntu/test/temp_extract_dir/SysInternals.E01"
+         autocomplete="off" spellcheck="false">
+  <button type="submit">Register evidence</button>
+</form>
+
+{% if evidences %}
+<h2>Registered evidence</h2>
+<div class="table-wrap">
+  <table class="listing">
+    <thead>
+      <tr>
+        <th>ID</th><th>File</th><th>Format</th><th>Media size</th>
+        <th>Filesystem</th><th>Scope</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in evidences %}
+      <tr>
+        <td><a href="/evidence/{{ item.evidence_id }}"><code>{{ item.evidence_id }}</code></a></td>
+        <td>{{ item.filename }}</td>
+        <td>{{ item.format }}</td>
+        <td>{{ item.media_size|filesize }}</td>
+        <td>{{ item.layout.filesystem or "unknown" }}</td>
+        <td>{{ item.layout.scope }}</td>
+        <td>{{ item.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No evidence registered yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,25 @@
+<section class="card triage-card" id="triage-panel-{{ entry.entry_id }}"
+         data-triage-entry="{{ entry.entry_id }}">
+  <div class="detail-head">
+    <h3>Static triage</h3>
+    {% if latest_triage %}
+    <span class="badge {% if latest_triage.status == 'complete' %}ok{% elif latest_triage.status == 'partial' %}unalloc{% elif latest_triage.status in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">
+      last: {{ latest_triage.status }}
+    </span>
+    {% if latest_triage.cached %}<span class="badge ok">cached</span>{% endif %}
+    {% endif %}
+  </div>
+  <div id="triage-summary-{{ entry.entry_id }}" data-triage-summary>
+  {% include "partials/triage_summary.html" %}
+  </div>
+  <p class="muted small-note">
+    Static analysis of a read-only extracted copy: hashes, entropy, strings,
+    YARA, ExifTool and PE metadata. The evidence file is never executed and no
+    sample or hash is uploaded anywhere.
+  </p>
+  <div id="triage-job-{{ entry.entry_id }}" aria-live="polite"></div>
+</section>
+
+{% if vt_status is defined %}
+{% include "partials/virustotal_panel.html" %}
+{% endif %}

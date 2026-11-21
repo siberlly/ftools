@@ -1,0 +1,16 @@
+<div class="card">
+  <h2>Filesystem index required</h2>
+  <div class="alert warn">{{ message }}</div>
+  {% if status.warning %}<div class="alert warn">{{ status.warning }}</div>{% endif %}
+  <dl>
+    <dt>Status</dt><dd>{{ status.status }}</dd>
+    <dt>Stale</dt><dd>{{ "yes" if status.stale else "no" }}</dd>
+    <dt>Entries indexed</dt><dd>{{ status.entries_indexed }}</dd>
+    <dt>Parse errors</dt><dd>{{ status.parse_errors }}</dd>
+    <dt>Index complete</dt><dd>{{ "yes" if status.complete else "no" }}</dd>
+  </dl>
+  <p class="muted">
+    Use the Build/Rebuild Index button in the Filesystem index card above.
+    If a scan is running, this page will update when you refresh the tab.
+  </p>
+</div>

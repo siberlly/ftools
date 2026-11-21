@@ -1,0 +1,174 @@
+{% set pv = preview %}
+<div class="preview-wrap"
+     data-preview-entry="{{ entry_id }}"
+     data-preview-mode="{{ mode }}"
+     data-preview-offset="{{ render_offset }}"
+     data-preview-limit="{{ render_limit or '' }}">
+  <div class="detail-head">
+    <h3>Preview content</h3>
+    {% if error %}
+    <span class="badge deleted">extraction failed</span>
+    {% elif pv %}
+    <span class="badge {% if pv.truncated %}unalloc{% else %}ok{% endif %}">
+      {{ "truncated" if pv.truncated else "ready" }}
+    </span>
+    <span class="badge kind">{{ pv.preview_mode }}</span>
+    {% if pv.encoding %}<span class="badge kind">{{ pv.encoding }}</span>{% endif %}
+    {% endif %}
+  </div>
+
+  {% if error %}
+  <div class="alert error" role="alert">
+    <strong>Preview could not be produced.</strong>
+    <p class="small-note"><code>{{ error_code }}</code> {{ error }}</p>
+    <p class="muted small-note">
+      Only files inside this evidence and inside the case export directory can
+      be previewed. Nothing was executed.
+    </p>
+  </div>
+  {% else %}
+  <dl class="file-facts preview-facts">
+    <dt>Detected type</dt>
+    <dd>
+      {{ pv.detected_type }}
+      {% if pv.mime_type %} &middot; <code>{{ pv.mime_type }}</code>{% endif %}
+    </dd>
+    <dt>Encoding</dt><dd>{{ pv.encoding or "not applicable (binary)" }}</dd>
+    <dt>Size</dt>
+    <dd>{{ pv.total_size|filesize }} ({{ pv.total_size }} bytes)</dd>
+    <dt>Viewing</dt>
+    <dd>
+      bytes {{ pv.offset }}–{{ pv.offset + pv.returned_bytes }} of
+      {{ pv.total_size }} &middot; {{ pv.returned_bytes }} byte(s) returned
+      {% if pv.lines_returned %} &middot; {{ pv.lines_returned }} line(s){% endif %}
+    </dd>
+    <dt>Limit</dt>
+    <dd>{{ pv.byte_limit }} byte(s){% if pv.line_limit %} / {{ pv.line_limit }} line(s){% endif %}</dd>
+  </dl>
+
+  {% if pv.truncated %}
+  <div class="alert warn" role="status">
+    <strong>Preview truncated.</strong>
+    The file is larger than the requested range or line limit. The preview
+    never silently cuts content: only the bytes and lines reported above were
+    loaded.
+  </div>
+  {% endif %}
+
+  {% if pv.registry %}
+  <div class="preview-registry" data-preview-registry>
+    <p class="small-note">
+      This is a Windows Registry Hive
+      (<code>{{ pv.registry.hive_type }}</code>). Registry hives are binary, so
+      only a bounded hex view and header metadata are shown here.
+    </p>
+    <dl class="file-facts">
+      <dt>regf signature</dt>
+      <dd>
+        {% if pv.registry.header.signature_valid %}
+        <span class="badge ok">valid ({{ pv.registry.header.signature }})</span>
+        {% else %}
+        <span class="badge deleted">missing</span>
+        {% endif %}
+      </dd>
+      <dt>Sequence</dt>
+      <dd>
+        {{ pv.registry.header.primary_sequence }} /
+        {{ pv.registry.header.secondary_sequence }}
+        {% if pv.registry.header.dirty %}<span class="badge unalloc">dirty</span>{% endif %}
+      </dd>
+      <dt>Format version</dt>
+      <dd>{{ pv.registry.header.major_version }}.{{ pv.registry.header.minor_version }} &middot; minor {{ pv.registry.header.minor_format_version }}</dd>
+      <dt>Hive bins size</dt>
+      <dd>{{ pv.registry.header.hive_bins_data_size }} bytes</dd>
+      <dt>Parse state</dt>
+      <dd>
+        {% if pv.registry.index_state in ('ready','partial') %}
+        <span class="badge ok">{{ pv.registry.index_state }}</span>
+        {{ pv.registry.key_count }} keys / {{ pv.registry.value_count }} values
+        {% else %}
+        <span class="badge unalloc">{{ pv.registry.index_state }}</span>
+        {% endif %}
+      </dd>
+    </dl>
+    <div class="entry-actions">
+      {% if pv.registry.index_state in ('ready','partial') and pv.registry.indexed_hive_id %}
+      <button type="button" class="tree-btn"
+              data-open-registry-hive="{{ pv.registry.indexed_hive_id }}"
+              data-registry-evidence="{{ evidence_id }}">
+        Open in Registry Explorer
+      </button>
+      {% else %}
+      <form hx-post="/evidence/{{ evidence_id }}/registry/{{ entry_id }}/index"
+            hx-target="#preview-registry-status" hx-swap="innerHTML"
+            hx-confirm="Parse this registry hive now? The working copy is extracted read-only.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="rebuild" value="0">
+        <button type="submit" class="tree-btn">Parse hive</button>
+      </form>
+      <button type="button" class="tree-btn"
+              data-open-registry-tab="{{ evidence_id }}"
+              data-registry-entry="{{ entry_id }}">
+        Open in Registry Explorer
+      </button>
+      {% endif %}
+    </div>
+    <div id="preview-registry-status" class="registry-status-slot"></div>
+  </div>
+  {% endif %}
+
+  {% if pv.warnings %}
+  <div class="alert warn small-note">
+    <strong>Warnings</strong>
+    <ul>{% for warning in pv.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="preview-toolbar">
+    <label class="preview-search">
+      <span>Find in preview</span>
+      <input type="search" data-preview-search maxlength="200"
+             placeholder="Search loaded content" autocomplete="off">
+    </label>
+    <button type="button" class="tree-btn" data-preview-copy-all>Copy all</button>
+    <button type="button" class="tree-btn" data-preview-copy-selection>Copy selected text</button>
+    <span class="muted small-note" data-preview-match-count></span>
+  </div>
+
+  {% if pv.preview_mode == 'text' %}
+  <div class="preview-scroll">
+    <div class="preview-gutter" aria-hidden="true">{% for number in range(1, pv.lines_returned + 1) %}<span>{{ number }}</span>
+{% endfor %}</div>
+    <pre class="preview-text" data-preview-content tabindex="0"
+         aria-label="File content preview">{{ pv.content }}</pre>
+  </div>
+  {% else %}
+  <pre class="preview-hex" data-preview-content tabindex="0"
+       aria-label="Hexadecimal preview">{{ pv.content }}</pre>
+  {% endif %}
+
+  <div class="preview-nav entry-actions">
+    {% if pv.offset > 0 %}
+    <button type="button" class="tree-btn"
+            data-preview-goto="0">Back to start</button>
+    {% endif %}
+    {% if pv.has_more and pv.next_offset is not none %}
+    <button type="button" class="tree-btn"
+            data-preview-goto="{{ pv.next_offset }}"
+            data-preview-mode="{{ pv.preview_mode }}">Load next {{ pv.byte_limit }} bytes</button>
+    {% endif %}
+    <button type="button" class="link"
+            data-preview-goto="{{ pv.offset }}"
+            data-preview-mode="hex">Hex view</button>
+    {% if pv.preview_mode != 'text' %}
+    <button type="button" class="link"
+            data-preview-goto="{{ pv.offset }}"
+            data-preview-mode="text">Text view</button>
+    {% endif %}
+  </div>
+  <p class="muted small-note">
+    Content is untrusted evidence. It is displayed as text only, never
+    executed, imported or opened by an application.
+  </p>
+  {% endif %}
+</div>

@@ -1,0 +1,197 @@
+<div class="file-panel">
+  <header class="dir-panel-head">
+    <div>
+      <h3 class="dir-panel-title">{{ entry.basename }}</h3>
+      <p class="muted path-line"><code>{{ entry.full_path }}</code></p>
+    </div>
+    <div class="dir-panel-badges">
+      {% if entry.deleted %}
+        <span class="badge deleted">deleted</span>
+      {% elif entry.allocated %}
+        <span class="badge ok">allocated</span>
+      {% else %}
+        <span class="badge unalloc">unallocated</span>
+      {% endif %}
+      <span class="badge kind">file</span>
+    </div>
+  </header>
+
+  <dl class="file-facts">
+    <dt>Evidence path</dt><dd><code>{{ entry.full_path }}</code></dd>
+    <dt>MFT / inode</dt>
+    <dd>{{ entry.inode if entry.inode is not none else "unknown" }}{% if entry.sequence is not none %} (sequence {{ entry.sequence }}){% endif %}</dd>
+    <dt>Allocation</dt>
+    <dd>
+      {% if entry.deleted %}deleted / unallocated
+      {% elif entry.allocated %}allocated
+      {% else %}unallocated{% endif %}
+    </dd>
+    <dt>Size</dt><dd>{{ entry.size|filesize }}{% if entry.size is not none %} ({{ entry.size }} bytes){% endif %}</dd>
+    <dt>Created</dt><dd>{{ entry.created_time or "not recorded" }}</dd>
+    <dt>Modified</dt><dd>{{ entry.modified_time or "not recorded" }}</dd>
+    <dt>MFT modified</dt><dd>{{ entry.mft_modified_time or "not recorded" }}</dd>
+    <dt>Accessed</dt><dd>{{ entry.accessed_time or "not recorded" }}</dd>
+    <dt>fls type</dt><dd><code>{{ entry.fls_type or "unknown" }}</code></dd>
+  </dl>
+
+  <div class="alert warn">
+    <strong>Untrusted evidence file.</strong>
+    Metadata, names and extracted content are evidence data. Nothing is opened
+    or executed. Extraction writes a copy into the case export directory and is
+    never autorun.
+  </div>
+
+  {% if metadata_error %}
+  <div class="alert error">
+    Live istat metadata unavailable: {{ metadata_error }}
+  </div>
+  {% endif %}
+
+  {% if metadata %}
+  <details class="raw-block" open>
+    <summary>Live istat metadata (MFT entry {{ metadata.inode }})</summary>
+    <dl class="file-facts">
+      <dt>Entry type</dt><dd>{{ "directory" if metadata.summary.is_directory else "file" }}</dd>
+      <dt>Flags</dt><dd>{{ metadata.summary.flags or "none" }}</dd>
+      <dt>Owner / security</dt>
+      <dd>owner {{ metadata.summary.get("owner_id", "n/a") }} &middot; security {{ metadata.summary.security_id if metadata.summary.security_id is not none else "n/a" }}</dd>
+    </dl>
+    {% if metadata.summary.attributes %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Type</th><th>ID</th><th>Name</th><th>Storage</th><th>Size</th></tr></thead>
+        <tbody>
+          {% for attr in metadata.summary.attributes %}
+          <tr>
+            <td><code>{{ attr.type }}</code></td>
+            <td class="num">{{ attr.id }}</td>
+            <td>{{ attr.name }}</td>
+            <td>{{ attr.storage }}</td>
+            <td>{{ attr.size|filesize }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  {% if entry.deleted %}
+  <div class="alert warn">
+    This entry is deleted/unallocated. Live istat/icat access may fail or return
+    partial data; extraction reports its own status and warnings.
+  </div>
+  {% endif %}
+
+  {% if entry.inode is not none %}
+  <form class="form extract-form" method="post"
+        action="/evidence/{{ entry.evidence_id }}/entry/{{ entry.entry_id }}/extract"
+        data-tree-extract-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="case_id_entry_{{ entry.entry_id }}">Case ID</label>
+    <input id="case_id_entry_{{ entry.entry_id }}" name="case_id" type="text"
+           value="case01" required
+           pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,63}"
+           title="1-64 characters: A-Z, a-z, 0-9, underscore, hyphen">
+    <button type="submit">Extract file</button>
+  </form>
+  <div class="tree-extract-result" data-tree-extract-result></div>
+  {% else %}
+  <p class="muted">This entry has no MFT/inode and cannot be extracted.</p>
+  {% endif %}
+</div>
+
+<section class="card preview-card" id="preview-card-{{ entry.entry_id }}"
+         data-preview-card data-preview-evidence="{{ record.evidence_id }}"
+         data-preview-entry="{{ entry.entry_id }}"
+         data-preview-default-limit="{{ preview_default_limit }}">
+  {% set rl = registry_link %}
+  <div class="detail-head">
+    <h3>Preview content</h3>
+    {% if rl %}<span class="badge kind">Windows Registry Hive</span>{% endif %}
+    <button type="button" class="link" data-preview-toggle
+            aria-expanded="true" aria-controls="preview-body-{{ entry.entry_id }}">
+      Collapse
+    </button>
+  </div>
+
+  <div class="preview-body" id="preview-body-{{ entry.entry_id }}"
+       data-preview-body>
+    {% if entry.inode is none %}
+    <p class="muted">This entry has no MFT/inode and cannot be previewed.</p>
+    {% else %}
+    {% if rl %}
+    <dl class="file-facts preview-facts">
+      <dt>Type</dt>
+      <dd>Windows Registry Hive &middot; <code>{{ rl.hive_type }}</code>
+        {% if rl.sensitive %}<span class="badge unalloc">sensitive (metadata only)</span>{% endif %}
+      </dd>
+      <dt>Evidence path</dt><dd><code>{{ entry.full_path }}</code></dd>
+      <dt>Entry / MFT</dt><dd>{{ entry.entry_id }} / {{ entry.inode }}</dd>
+      <dt>Size</dt>
+      <dd>{{ entry.size|filesize }}{% if entry.size is not none %} ({{ entry.size }} bytes){% endif %}</dd>
+      <dt>Allocation</dt>
+      <dd>{% if entry.deleted %}deleted / unallocated{% elif entry.allocated %}allocated{% else %}unallocated{% endif %}</dd>
+      <dt>Parse state</dt>
+      <dd>
+        {% if rl.state in ('ready','partial') %}
+        <span class="badge ok">{{ rl.state }}</span>
+        {{ rl.key_count }} keys / {{ rl.value_count }} values
+        {% elif rl.state %}
+        <span class="badge {% if rl.state in ('failed','interrupted') %}deleted{% else %}kind{% endif %}">{{ rl.state }}</span>
+        {% else %}
+        <span class="badge unalloc">not indexed</span>
+        {% endif %}
+      </dd>
+    </dl>
+    <div class="entry-actions">
+      <button type="button" class="tree-btn" data-preview-load data-preview-mode="auto">
+        Preview content
+      </button>
+      <button type="button" class="tree-btn" data-preview-load
+              data-preview-mode="hex" data-preview-limit="65536">
+        Raw hex preview
+      </button>
+      {% if rl.openable and rl.hive_id %}
+      <button type="button" class="tree-btn"
+              data-open-registry-hive="{{ rl.hive_id }}"
+              data-registry-evidence="{{ record.evidence_id }}">
+        Open in Registry Explorer
+      </button>
+      {% else %}
+      <form hx-post="/evidence/{{ record.evidence_id }}/registry/{{ entry.entry_id }}/index"
+            hx-target="#preview-registry-status" hx-swap="innerHTML"
+            hx-confirm="Parse this registry hive now? The working copy is extracted read-only.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="rebuild" value="0">
+        <button type="submit" class="tree-btn">Parse hive</button>
+      </form>
+      <button type="button" class="tree-btn"
+              data-open-registry-tab="{{ record.evidence_id }}"
+              data-registry-entry="{{ entry.entry_id }}">
+        Open in Registry Explorer
+      </button>
+      {% endif %}
+    </div>
+    <div id="preview-registry-status" class="registry-status-slot"></div>
+    <p class="muted small-note">
+      A hive is not parsed just by selecting it. Parsing only starts from the
+      explicit action above and uses the existing read-only Registry workflow.
+    </p>
+    {% else %}
+    <div class="entry-actions">
+      <button type="button" class="tree-btn" data-preview-load data-preview-mode="auto">
+        Preview content
+      </button>
+    </div>
+    {% endif %}
+    <div id="preview-panel-{{ entry.entry_id }}" class="preview-panel-slot"
+         aria-live="polite" data-preview-slot>
+      <p class="muted small-note">Preview not loaded.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+{% include "partials/triage_panel.html" %}

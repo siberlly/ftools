@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Integrations - DFIR Browser{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All evidence</a></p>
+<h1>Settings &rarr; Integrations</h1>
+<p class="muted">
+  External lookups are opt-in per action. Static triage and filesystem browsing
+  never contact the network on their own.
+</p>
+
+<section class="card" id="vt-settings-card">
+  {% include "partials/virustotal_settings.html" %}
+</section>
+{% endblock %}

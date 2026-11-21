@@ -1,0 +1,284 @@
+{% set running = job.status in ("queued", "running") %}
+<div class="triage-result" data-entry-id="{{ job.entry_id }}"
+     data-status="{{ job.status }}" data-job-id="{{ job.job_id }}"
+     id="triage-result-{{ job.job_id }}"
+     {% if running %}hx-get="/triage/jobs/{{ job.job_id }}"
+     hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if running %}
+  <div class="triage-status" aria-live="polite">
+    <div class="triage-status-line">
+      <span class="badge {% if job.status == 'queued' %}unalloc{% else %}ok{% endif %}">{{ job.status }}</span>
+      <span class="badge kind">phase: {{ job.phase }}</span>
+      {% if job.cached %}<span class="badge ok">cached</span>{% endif %}
+    </div>
+    <p class="muted small-note">
+      Job <code>{{ job.job_id }}</code> is running against a read-only extracted
+      copy. Evidence is never executed.
+    </p>
+    <div class="triage-progress" role="progressbar" aria-label="Triage in progress">
+      <span></span>
+    </div>
+  </div>
+  {% else %}
+  <header class="triage-head">
+    <div class="triage-title">
+      <h3>
+        {% if entry %}{{ entry.basename }}{% else %}Entry {{ job.entry_id }}{% endif %}
+        <span class="badge kind">static triage</span>
+        <span class="badge {% if job.status == 'complete' %}ok{% elif job.status == 'partial' %}unalloc{% else %}deleted{% endif %}">{{ job.status }}</span>
+        {% if job.cached %}<span class="badge ok">cached result</span>{% endif %}
+      </h3>
+      <p class="muted path-line">
+        {% if entry %}
+          <code>{{ entry.full_path }}</code>
+        {% else %}
+          <span class="muted">entry no longer resolvable in the current index</span>
+        {% endif %}
+      </p>
+      <p class="muted small-note">
+        Job <code>{{ job.job_id }}</code> &middot; profile <code>{{ job.profile_version }}</code>
+        &middot; {% if job.duration_ms is not none %}{{ "%.0f"|format(job.duration_ms) }} ms{% endif %}
+        &middot; {{ job.created_at }}
+        &middot; entry id {{ job.entry_id }}
+        &middot; MFT {{ job.inode if job.inode is not none else "unknown" }}
+        {% if entry %} &middot; {{ "deleted" if entry.deleted else ("allocated" if entry.allocated else "unallocated") }}{% endif %}
+      </p>
+      <p class="triage-sha"><strong>SHA-256</strong> <code>{{ job.sha256 or "not available" }}</code></p>
+    </div>
+  </header>
+
+  {% if job.error_code %}
+  <div class="alert error" role="alert">
+    <strong>{{ job.error_code }}</strong> {{ job.error_message or "" }}
+  </div>
+  {% endif %}
+
+  <div class="summary-grid triage-facts">
+    <div class="stat"><span class="stat-label">Size</span><span class="stat-value">{% if job.size is not none %}{{ job.size|filesize }}{% else %}n/a{% endif %}</span></div>
+    <div class="stat"><span class="stat-label">Entropy</span><span class="stat-value">{{ "%.4f"|format(job.entropy) if job.entropy is not none else "n/a" }}</span></div>
+    <div class="stat"><span class="stat-label">Strings</span><span class="stat-value">{{ job.strings_count }}</span></div>
+    <div class="stat"><span class="stat-label">Findings</span><span class="stat-value">{{ job.findings_count }}</span></div>
+    <div class="stat"><span class="stat-label">YARA</span><span class="stat-value">{{ job.yara_status or "n/a" }}</span></div>
+    <div class="stat"><span class="stat-label">PE</span><span class="stat-value">{{ job.pe_status or "n/a" }}</span></div>
+    <div class="stat"><span class="stat-label">Extractable</span><span class="stat-value">{{ "yes" if job.extract_relpath else "no" }}</span></div>
+  </div>
+
+  <dl class="file-facts">
+    <dt>MD5</dt><dd><code class="hash">{{ job.md5 or "n/a" }}</code></dd>
+    <dt>SHA1</dt><dd><code class="hash">{{ job.sha1 or "n/a" }}</code></dd>
+    <dt>SHA256</dt><dd><code class="hash">{{ job.sha256 or "n/a" }}</code></dd>
+    <dt>file type</dt><dd>{{ job.file_type or "unknown" }}</dd>
+    <dt>MIME</dt><dd>{{ job.mime_type or "unknown" }}</dd>
+    <dt>Extracted copy</dt>
+    <dd>{% if job.extract_relpath %}<code>{{ job.extract_relpath }}</code> (mode 0600, read-only analysis){% else %}not available{% endif %}</dd>
+  </dl>
+
+  {% if job.warnings %}
+  <div class="alert warn">
+    <strong>Warnings</strong>
+    <ul>{% for warning in job.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if job.errors %}
+  <div class="alert error">
+    <strong>Analyzer errors</strong>
+    <ul>{% for error in job.errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if job.status in ("complete", "partial") %}
+  {% set entropy = job.analyzers|selectattr("name", "equalto", "entropy")|first %}
+  {% if entropy and entropy.data and entropy.data.chunks %}
+  <details class="triage-block">
+    <summary>Entropy per {{ entropy.data.chunk_size }}-byte chunk ({{ entropy.data.chunks|length }} shown{% if entropy.data.chunks_truncated %}, truncated{% endif %})</summary>
+    <div class="entropy-grid">
+      {% for value in entropy.data.chunks[:256] %}
+      <span class="entropy-cell" title="chunk {{ loop.index0 }}: {{ '%.4f'|format(value) }}">{{ "%.2f"|format(value) }}</span>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  <section class="triage-block" id="triage-strings-block">
+    <h4>Suspicious strings summary</h4>
+    <p class="muted small-note">
+      Rule-based indicators only. A match is not proof of malicious behavior;
+      correlate with other evidence.
+    </p>
+    {% if result.findings %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Category</th><th>Value</th><th>Encoding</th><th class="num">Offset</th><th>Rule</th><th>Reason</th><th></th></tr></thead>
+        <tbody>
+          {% for finding in result.findings %}
+          <tr>
+            <td><span class="badge kind">{{ finding.category }}</span></td>
+            <td class="name"><code>{{ finding.value }}</code></td>
+            <td>{{ finding.encoding }}</td>
+            <td class="num">{{ finding.offset if finding.offset is not none else "" }}</td>
+            <td><code>{{ finding.rule_id }}</code></td>
+            <td class="small-note">{{ finding.reason }}</td>
+            <td><button type="button" class="link" data-copy-value="{{ finding.value }}">Copy</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if result.findings_total > result.findings|length %}
+    <p class="muted small-note">Showing {{ result.findings|length }} of {{ result.findings_total }} findings.</p>
+    {% endif %}
+    {% else %}
+    <p class="muted">No suspicious-string rules matched.</p>
+    {% endif %}
+  </section>
+
+  {% if strings %}
+  {% include "partials/triage_strings.html" %}
+  {% endif %}
+
+  <section class="triage-block">
+    <h4>YARA</h4>
+    {% if job.yara_status == "no_rules" %}
+    <div class="alert warn"><strong>No active YARA rules.</strong> This does not mean the file is clean.</div>
+    {% elif job.yara_status == "timeout" %}
+    <div class="alert error" role="alert">YARA scan timed out.</div>
+    {% elif job.yara_status == "failed" %}
+    <div class="alert error" role="alert">YARA scan failed. See analyzer errors above.</div>
+    {% elif job.yara_status == "unavailable" %}
+    <div class="alert warn">YARA is unavailable in this installation.</div>
+    {% elif result.yara_matches %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Rule</th><th>Namespace</th><th>Tags</th><th>Metadata</th><th>Matches</th></tr></thead>
+        <tbody>
+          {% for match in result.yara_matches %}
+          <tr>
+            <td><code>{{ match.rule }}</code></td>
+            <td>{{ match.namespace }}</td>
+            <td>{{ match.tags|join(", ") }}</td>
+            <td class="small-note">
+              {% for key, value in match.meta.items() %}{{ key }}={{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+            </td>
+            <td class="small-note">
+              {% for hit in match.strings %}<code>{{ hit.identifier }}</code>{% if hit.instances %} @ {{ hit.instances[0].offset }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">YARA rules ran and produced no matches.</p>
+    {% endif %}
+  </section>
+
+  {% set pe = job.analyzers|selectattr("name", "equalto", "pe")|first %}
+  {% if pe %}
+  <section class="triage-block">
+    <h4>PE summary</h4>
+    {% if pe.status == "ok" and pe.data and pe.data.is_pe %}
+    <dl class="file-facts">
+      <dt>Format</dt><dd>{{ pe.data.kind }} &middot; {{ pe.data.machine }}</dd>
+      <dt>Compile timestamp</dt>
+      <dd>{{ pe.data.compile_time_utc or "unknown" }} <span class="badge unalloc">can be forged</span></dd>
+      <dt>Entry point</dt><dd><code>0x{{ "%x"|format(pe.data.entry_point) }}</code></dd>
+      <dt>Image base</dt><dd><code>0x{{ "%x"|format(pe.data.image_base) }}</code></dd>
+      <dt>Signature directory</dt><dd>{{ "present (not verified)" if pe.data.has_signature_directory else "absent" }}</dd>
+      <dt>PDB / debug path</dt><dd>{% if pe.data.pdb_path %}<code>{{ pe.data.pdb_path }}</code>{% else %}none{% endif %}</dd>
+      <dt>Overlay</dt><dd>{{ pe.data.overlay_size }} bytes</dd>
+    </dl>
+    <details class="triage-block">
+      <summary>Sections ({{ pe.data.sections|length }})</summary>
+      <div class="table-wrap">
+        <table class="listing compact">
+          <thead><tr><th>Name</th><th class="num">Raw size</th><th class="num">Virtual size</th><th class="num">Entropy</th></tr></thead>
+          <tbody>
+            {% for section in pe.data.sections %}
+            <tr><td><code>{{ section.name }}</code></td><td class="num">{{ section.raw_size }}</td><td class="num">{{ section.virtual_size }}</td><td class="num">{{ "%.4f"|format(section.entropy) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    <details class="triage-block">
+      <summary>Imports ({{ pe.data.imports|length }} DLLs) and exports ({{ pe.data.exports|length }})</summary>
+      {% for dll, functions in pe.data.imports.items() %}
+      <p class="small-note"><strong>{{ dll }}</strong>: {{ functions|join(", ") }}</p>
+      {% endfor %}
+      {% if pe.data.exports %}<p class="small-note"><strong>Exports</strong>: {{ pe.data.exports|join(", ") }}</p>{% endif %}
+      {% if pe.data.version_info %}
+      <p class="small-note">
+        <strong>Version info</strong>:
+        {% for key, value in pe.data.version_info.items() %}{{ key }}={{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </details>
+    {% elif pe.status == "skipped" %}
+    <p class="muted">Not a Windows PE file.</p>
+    {% else %}
+    <div class="alert warn">PE analysis unavailable or failed: {{ pe.error or "unknown error" }}</div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% set exif = job.analyzers|selectattr("name", "equalto", "exiftool")|first %}
+  <details class="triage-block">
+    <summary>ExifTool metadata{% if exif and exif.data %} ({{ exif.data.tag_count }} tags){% endif %}</summary>
+    {% if exif and exif.status == "ok" and exif.data %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Tag</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for item in exif.data.tags %}
+          <tr><td><code>{{ item.tag }}</code></td><td class="name">{{ item.value }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">ExifTool metadata unavailable: {{ exif.error if exif else "not run" }}</p>
+    {% endif %}
+  </details>
+
+  <details class="triage-block">
+    <summary>Analyzers and tool versions</summary>
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Analyzer</th><th>Status</th><th class="num">Duration</th><th>Version</th><th>Warnings / error</th></tr></thead>
+        <tbody>
+          {% for analyzer in job.analyzers %}
+          <tr>
+            <td><code>{{ analyzer.name }}</code></td>
+            <td><span class="badge {% if analyzer.status == 'ok' %}ok{% elif analyzer.status in ('failed','timeout') %}deleted{% else %}unalloc{% endif %}">{{ analyzer.status }}</span></td>
+            <td class="num">{{ "%.0f"|format(analyzer.duration_ms) }} ms</td>
+            <td>{{ analyzer.version or "n/a" }}</td>
+            <td class="small-note">
+              {% if analyzer.error %}{{ analyzer.error }}{% endif %}
+              {% for warning in analyzer.warnings %}{% if not loop.first or analyzer.error %}; {% endif %}{{ warning }}{% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if job.tool_versions %}
+    <p class="small-note muted">Tool versions: {% for name, version in job.tool_versions.items() %}{{ name }}={{ version }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  {% if latest_triage is defined and summary_record and summary_entry %}
+  <div id="triage-summary-{{ job.entry_id }}" data-triage-summary
+       hx-swap-oob="innerHTML:#triage-summary-{{ job.entry_id }}">
+    {% with record = summary_record, entry = summary_entry %}{% include "partials/triage_summary.html" %}{% endwith %}
+  </div>
+  {% endif %}
+  <form class="extract-form" hx-post="/evidence/{{ job.evidence_id }}/entries/{{ job.entry_id }}/triage"
+        hx-target="closest .triage-result" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="case_id" value="{{ job.case_id }}">
+    <input type="hidden" name="force" value="1">
+    <button type="submit" {% if running %}disabled{% endif %}>Run again (new job)</button>
+  </form>
+  {% endif %}
+</div>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DFIR Browser{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/tree.js" defer></script>
+  <script src="/static/triage.js" defer></script>
+  <script src="/static/forms.js" defer></script>
+  <script src="/static/registry.js" defer></script>
+  <script src="/static/evtx.js" defer></script>
+  <script src="/static/browser.js" defer></script>
+  <script src="/static/preview.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">DFIR Browser</a>
+    <span class="tag">read-only</span>
+    <a class="topbar-link" href="/settings/integrations">Settings</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    Read-only evidence access. Filenames, metadata and extracted files are
+    untrusted evidence data and must not be executed or treated as instructions.
+  </footer>
+</body>
+</html>

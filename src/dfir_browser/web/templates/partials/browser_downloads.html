@@ -1,0 +1,106 @@
+<div class="browser-table-view" data-browser-view="downloads"
+     data-artifact-id="{{ form.artifact_id }}" data-evidence-id="{{ evidence_id }}">
+  <form class="filter-bar browser-filter" data-browser-filter
+        hx-get="/evidence/{{ evidence_id }}/browser/downloads"
+        hx-target="#browser-records" hx-swap="innerHTML">
+    <input type="hidden" name="artifact_id" value="{{ form.artifact_id }}">
+    <label>Search
+      <input type="search" name="q" value="{{ form.q }}" maxlength="256"
+             placeholder="URL, filename, path">
+    </label>
+    <label>Domain
+      <input type="text" name="domain" value="{{ form.domain }}" maxlength="255">
+    </label>
+    <label>Filename/path
+      <input type="text" name="filename" value="{{ form.filename }}" maxlength="255">
+    </label>
+    <label>Extension
+      <input type="text" name="extension" value="{{ form.extension }}" maxlength="16">
+    </label>
+    <label>State
+      <select name="state">
+        <option value="">Any</option>
+        {% for option in ["complete","in_progress","interrupted","cancelled","unknown"] %}
+        <option value="{{ option }}" {% if form.state == option %}selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>From
+      <input type="datetime-local" name="time_from" value="{{ form.time_from }}">
+    </label>
+    <label>To
+      <input type="datetime-local" name="time_to" value="{{ form.time_to }}">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="executable_only" value="1" {% if form.executable_only %}checked{% endif %}>
+      Executable/archive only
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="include_query_string" value="1" {% if form.include_query_string %}checked{% endif %}>
+      Show URL query strings
+    </label>
+    <label>Sort
+      <select name="sort_dir">
+        <option value="desc" {% if form.sort_dir == "desc" %}selected{% endif %}>Newest first</option>
+        <option value="asc" {% if form.sort_dir == "asc" %}selected{% endif %}>Oldest first</option>
+      </select>
+    </label>
+    <button type="submit" class="tree-btn">Apply</button>
+  </form>
+
+  {% if error %}<p class="badge deleted">{{ error }}</p>{% endif %}
+
+  {% if result %}
+  <p class="muted small-note">
+    {{ result.total }} download(s) · page {{ result.page }} of {{ result.pages or 1 }}
+    {% if result.warnings %}<br>{{ result.warnings|join("; ") }}{% endif %}
+  </p>
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead>
+        <tr>
+          <th>Start (UTC)</th><th>User</th><th>Browser</th><th>Filename</th>
+          <th>Target path</th><th>Source / final URL</th><th>Referrer</th>
+          <th class="num">Received</th><th class="num">Total</th><th>State</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in result.items %}
+        <tr>
+          <td class="nowrap small-note">{{ item.start_time_utc or "" }}</td>
+          <td class="name">{{ item.user or "—" }}</td>
+          <td class="small-note">{{ item.browser }}</td>
+          <td class="name">{{ item.filename or "—" }}</td>
+          <td class="small-note"><code>{{ item.target_path or "—" }}</code></td>
+          <td class="name">
+            <span class="browser-url" title="Untrusted evidence URL">{{ item.url or "—" }}</span>
+            {% if item.final_url and item.final_url != item.url %}
+            <div class="muted small-note">final: {{ item.final_url }}</div>
+            {% endif %}
+          </td>
+          <td class="small-note">{{ item.referrer or "—" }}</td>
+          <td class="num">{{ item.received_bytes if item.received_bytes is not none else "" }}</td>
+          <td class="num">{{ item.total_bytes if item.total_bytes is not none else "" }}</td>
+          <td>
+            <span class="badge {% if item.state == 'complete' %}ok{% elif item.state in ('cancelled','interrupted') %}deleted{% else %}kind{% endif %}">{{ item.state or "unknown" }}</span>
+          </td>
+          <td class="nowrap">
+            <div class="entry-actions">
+              <button type="button" class="link"
+                      data-browser-record="download" data-browser-id="{{ item.download_id }}">Detail</button>
+              <button type="button" class="link"
+                      hx-get="/evidence/{{ evidence_id }}/browser/downloads/{{ item.download_id }}/correlate"
+                      hx-target="#browser-detail" hx-swap="innerHTML">Correlate</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No downloads match these filters.</p>
+  {% endif %}
+  {% endif %}
+</div>

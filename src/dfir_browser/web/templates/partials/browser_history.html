@@ -1,0 +1,71 @@
+<div class="browser-table-view" data-browser-view="history"
+     data-artifact-id="{{ form.artifact_id }}" data-evidence-id="{{ evidence_id }}">
+  <form class="filter-bar browser-filter" data-browser-filter
+        hx-get="/evidence/{{ evidence_id }}/browser/history"
+        hx-target="#browser-records" hx-swap="innerHTML">
+    <input type="hidden" name="artifact_id" value="{{ form.artifact_id }}">
+    <label>Search
+      <input type="search" name="q" value="{{ form.q }}" maxlength="256"
+             placeholder="URL or title">
+    </label>
+    <label>Domain
+      <input type="text" name="domain" value="{{ form.domain }}" maxlength="255">
+    </label>
+    <label>From
+      <input type="datetime-local" name="time_from" value="{{ form.time_from }}">
+    </label>
+    <label>To
+      <input type="datetime-local" name="time_to" value="{{ form.time_to }}">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="include_query_string" value="1" {% if form.include_query_string %}checked{% endif %}>
+      Show URL query strings
+    </label>
+    <label>Sort
+      <select name="sort_dir">
+        <option value="desc" {% if form.sort_dir == "desc" %}selected{% endif %}>Newest first</option>
+        <option value="asc" {% if form.sort_dir == "asc" %}selected{% endif %}>Oldest first</option>
+      </select>
+    </label>
+    <button type="submit" class="tree-btn">Apply</button>
+  </form>
+
+  {% if error %}<p class="badge deleted">{{ error }}</p>{% endif %}
+  {% if result %}
+  <p class="muted small-note">
+    {{ result.total }} visit(s) · page {{ result.page }} of {{ result.pages or 1 }}
+  </p>
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead>
+        <tr><th>Visit time (UTC)</th><th>User</th><th>Browser</th><th>URL</th>
+        <th>Title</th><th>Referrer / transition</th><th class="num">Visits</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for item in result.items %}
+        <tr>
+          <td class="nowrap small-note">{{ item.visit_time_utc or "" }}</td>
+          <td class="name">{{ item.user or "—" }}</td>
+          <td class="small-note">{{ item.browser }}</td>
+          <td class="name"><span class="browser-url">{{ item.url or "—" }}</span></td>
+          <td class="name">{{ item.title or "—" }}</td>
+          <td class="small-note">
+            {{ item.referrer_url or "—" }}
+            <div class="muted">{{ item.visit_type or "" }}</div>
+          </td>
+          <td class="num">{{ item.visit_count if item.visit_count is not none else "" }}</td>
+          <td class="nowrap">
+            <button type="button" class="link"
+                    data-browser-record="visit" data-browser-id="{{ item.visit_id }}">Detail</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No history records match these filters.</p>
+  {% endif %}
+  {% endif %}
+</div>

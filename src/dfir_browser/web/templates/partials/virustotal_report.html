@@ -1,0 +1,58 @@
+{% set report = vt_result.report %}
+<div class="vt-report" data-vt-status="{{ vt_result.status }}">
+  {% if vt_result.status == "not_found" %}
+  <div class="alert warn">
+    <strong>Not found on VirusTotal.</strong>
+    This hash is not present in the reports available to this API key. That is
+    not a statement about whether the file is safe.
+  </div>
+  {% elif report %}
+  <div class="detail-head">
+    <h4>Report found</h4>
+    {% if vt_result.cached %}<span class="badge ok">cached</span>{% else %}<span class="badge kind">live</span>{% endif %}
+  </div>
+  <dl class="file-facts">
+    <dt>Report hash</dt><dd><code class="hash">{{ report.hash or vt_result.hash }}</code></dd>
+    <dt>Fetched</dt>
+    <dd>{{ vt_result.fetched_at }}{% if vt_result.cached %} (cache age {{ vt_result.cache_age_seconds }}s){% endif %}</dd>
+    <dt>Reputation</dt><dd>{{ report.reputation if report.reputation is not none else "unknown" }}</dd>
+    <dt>Type</dt><dd>{{ report.type_description or report.type_tag or "unknown" }}</dd>
+    <dt>Meaningful name</dt>
+    <dd>{% if report.meaningful_name %}<code>{{ report.meaningful_name }}</code> <span class="badge unalloc">remote untrusted data</span>{% else %}none reported{% endif %}</dd>
+    <dt>Size (VirusTotal)</dt><dd>{% if report.size is not none %}{{ report.size|filesize }} ({{ report.size }} bytes){% else %}unknown{% endif %}</dd>
+    <dt>First submission</dt><dd>{{ report.first_submission_date or "unknown" }}</dd>
+    <dt>Last submission</dt><dd>{{ report.last_submission_date or "unknown" }}</dd>
+    <dt>Last analysis</dt><dd>{{ report.last_analysis_date or "unknown" }}</dd>
+    <dt>Times submitted</dt><dd>{{ report.times_submitted if report.times_submitted is not none else "unknown" }}</dd>
+    <dt>Tags</dt><dd>{% if report.tags %}{{ report.tags|join(", ") }}{% else %}none{% endif %}</dd>
+  </dl>
+
+  <div class="summary-grid vt-stats">
+    {% for key in ("malicious", "suspicious", "undetected", "harmless", "timeout", "failure", "type-unsupported") %}
+    {% set value = report.last_analysis_stats.get(key, 0) %}
+    <div class="stat">
+      <span class="stat-label">{{ key }}</span>
+      <span class="stat-value">{{ value }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <p class="muted small-note">
+    {% if report.last_analysis_stats.get("malicious", 0) == 0 %}
+    No engines reported malicious in this VirusTotal report.
+    {% else %}
+    Some engines reported this hash as malicious. Engine verdicts are
+    indicators, not proof.
+    {% endif %}
+    This report is a snapshot from {{ vt_result.fetched_at }}; it is not a
+    guarantee that the file is safe or unsafe.
+  </p>
+
+  <p class="small-note">
+    <a href="{{ report.permalink }}" target="_blank" rel="noopener noreferrer">Open this hash on VirusTotal</a>
+    (opens a new tab; the DFIR browser never fetches it automatically).
+  </p>
+  {% else %}
+  <div class="alert error">VirusTotal returned no usable report.</div>
+  {% endif %}
+</div>

@@ -1,0 +1,20 @@
+<div class="registry-status" {% if artifact %}data-browser-status="{{ artifact.artifact_id }}" data-status="{{ artifact.status }}"{% endif %}>
+  {% if start_error %}
+  <p class="badge deleted">Index not started</p>
+  <p class="small-note">{{ start_error }}</p>
+  {% elif artifact %}
+  <p class="small-note">
+    <span class="badge {% if artifact.status == 'ready' %}ok{% elif artifact.status == 'partial' %}unalloc{% elif artifact.status == 'failed' %}deleted{% else %}kind{% endif %}">{{ artifact.status }}</span>
+    phase {{ artifact.phase }}
+    {% if started is defined and started %}(started){% endif %}
+    {% if cached is defined and cached %}(cached){% endif %}
+  </p>
+  <p class="small-note muted">
+    seen {{ artifact.records_seen }} · indexed {{ artifact.records_indexed }}
+    · errors {{ artifact.parse_errors }}
+    {% if artifact.warnings %}<br>warnings: {{ artifact.warnings|join("; ") }}{% endif %}
+  </p>
+  {% else %}
+  <p class="muted small-note">No status available.</p>
+  {% endif %}
+</div>

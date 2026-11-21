@@ -1,0 +1,50 @@
+<div class="tab-panel">
+  <h2>Deleted files</h2>
+  <p class="muted">
+    Deleted and unallocated entries come from the SQLite index. The default
+    view shows files only. All paths and metadata are untrusted evidence data.
+  </p>
+
+  <div class="summary-grid">
+    <div class="stat"><span class="stat-label">Deleted files</span><span class="stat-value">{{ status.deleted_files }}</span></div>
+    <div class="stat"><span class="stat-label">Deleted dirs</span><span class="stat-value">{{ status.deleted_directories }}</span></div>
+    <div class="stat"><span class="stat-label">Parse errors</span><span class="stat-value">{{ status.parse_errors }}</span></div>
+    <div class="stat"><span class="stat-label">Index complete</span><span class="stat-value">{{ "yes" if status.complete else "no" }}</span></div>
+  </div>
+
+  {% if not status.complete %}
+  <div class="alert warn">
+    <strong>Incomplete index.</strong> The deleted-file list may be missing entries.
+  </div>
+  {% endif %}
+
+  <form class="filter-form" method="get"
+        action="/evidence/{{ evidence_id }}/deleted"
+        hx-get="/evidence/{{ evidence_id }}/deleted"
+        hx-target="#tab-content" hx-swap="innerHTML">
+    <label>Filename or path
+      <input type="text" name="q" value="{{ form.q }}" maxlength="256"
+             placeholder="contains match">
+    </label>
+    <label>Extension
+      <input type="text" name="extension" value="{{ form.extension }}"
+             maxlength="32" placeholder="exe">
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="include_directories" value="1"
+             {% if form.include_directories %}checked{% endif %}>
+      Include deleted directories
+    </label>
+    <input type="hidden" name="sort" value="{{ form.sort }}">
+    <input type="hidden" name="sort_dir" value="{{ form.sort_dir }}">
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if error %}
+  <div class="alert error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    {% include "partials/entries_table.html" %}
+  {% endif %}
+</div>

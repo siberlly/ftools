@@ -1,0 +1,62 @@
+<div class="tab-panel">
+  <h2>Search</h2>
+  <p class="muted">
+    Search the SQLite index by filename or full path. SQL wildcards are
+    escaped; results are paginated. Paths and metadata are untrusted evidence
+    data.
+  </p>
+
+  <form class="filter-form search-form" method="get"
+        action="/evidence/{{ evidence_id }}/search"
+        hx-get="/evidence/{{ evidence_id }}/search"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        hx-indicator="#search-indicator" data-search-form>
+    <label>Query
+      <input type="text" name="q" value="{{ form.q }}" maxlength="256"
+             placeholder="SysInternals.exe" required>
+    </label>
+    <label>Extension
+      <input type="text" name="extension" value="{{ form.extension }}"
+             maxlength="32" placeholder="exe">
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="exact" value="1"
+             {% if form.exact %}checked{% endif %}>
+      Exact name/path
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="deleted_only" value="1"
+             {% if form.deleted_only %}checked{% endif %}>
+      Deleted only
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="allocated_only" value="1"
+             {% if form.allocated_only %}checked{% endif %}>
+      Allocated only
+    </label>
+    <label>Type
+      <select name="entry_type">
+        <option value="" {% if not form.entry_type %}selected{% endif %}>Any</option>
+        <option value="file" {% if form.entry_type == "file" %}selected{% endif %}>File</option>
+        <option value="directory" {% if form.entry_type == "directory" %}selected{% endif %}>Directory</option>
+      </select>
+    </label>
+    <input type="hidden" name="sort" value="{{ form.sort }}">
+    <input type="hidden" name="sort_dir" value="{{ form.sort_dir }}">
+    <button type="submit" data-search-submit>Search</button>
+    <span id="search-indicator" class="htmx-indicator muted small-note"
+          role="status" aria-live="polite">Searching…</span>
+  </form>
+
+  {% if error %}
+  <div class="alert error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    {% include "partials/entries_table.html" %}
+  {% else %}
+    {% if not error %}
+    <p class="muted">Enter a filename or path fragment to search the index.</p>
+    {% endif %}
+  {% endif %}
+</div>

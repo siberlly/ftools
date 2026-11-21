@@ -1,0 +1,102 @@
+<form class="filter-form" hx-get="/registry/hives/{{ hive_id }}/amcache"
+      hx-target="#amcache-results" hx-swap="innerHTML" data-search-form>
+  <label>Amcache query
+    <input type="text" name="q" value="{{ form.q }}" maxlength="256"
+           placeholder="SysInternals, taskmgr.exe, publisher, FileId">
+  </label>
+  <label class="checkbox-label">
+    <input type="checkbox" name="exact" value="1" {% if form.exact %}checked{% endif %}>
+    Exact
+  </label>
+  <button type="submit" data-search-submit>Search Amcache</button>
+</form>
+
+{% if result %}
+<div class="registry-amcache-result">
+  <p class="muted small-note">{{ result.total }} records &middot; page {{ result.page }} of {{ result.pages or 1 }}</p>
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="listing compact amcache-table">
+      <thead>
+        <tr>
+          <th>Executable</th><th>Path</th><th>FileId (raw)</th>
+          <th>Algorithm</th><th>Normalized hash</th><th class="num">Size</th>
+          <th>Publisher</th><th>Source key</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in result.items %}
+        <tr>
+          <td class="name">
+            {{ record.executable_name or "" }}
+            {% if not record.hash_valid %}<span class="badge unalloc">hash unknown</span>{% endif %}
+          </td>
+          <td class="name"><code>{{ record.executable_path or "" }}</code></td>
+          <td class="name"><code class="hash">{{ record.file_id_raw or "missing" }}</code><br>
+            <span class="muted small-note">{{ record.normalization_method }}</span></td>
+          <td><span class="badge kind">{{ record.hash_algorithm }}</span></td>
+          <td class="name">
+            {% if record.hash_normalized %}<code class="hash">{{ record.hash_normalized }}</code>{% else %}<span class="muted">not normalized</span>{% endif %}
+          </td>
+          <td class="num">{{ record.size if record.size is not none else "" }}</td>
+          <td class="small-note">{{ record.publisher or "" }}</td>
+          <td class="small-note">
+            {% if record.source_key_id %}
+            <button type="button" class="link" data-registry-reveal="{{ record.source_key_id }}">Reveal key</button>
+            {% endif %}
+            <div class="muted">{{ record.source_key_path }}</div>
+          </td>
+          <td class="nowrap">
+            <form class="amcache-compare-form"
+                  hx-post="/registry/hives/{{ hive_id }}/amcache/{{ record.record_id }}/compare"
+                  hx-target="#amcache-compare-{{ record.record_id }}" hx-swap="innerHTML">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="small-note">File entry ID
+                <input type="number" name="entry_id" min="1" required class="amcache-entry-id"
+                       placeholder="filesystem entry">
+              </label>
+              <button type="submit" class="link">Compare with triage</button>
+            </form>
+            <div id="amcache-compare-{{ record.record_id }}"></div>
+            {% if record.hash_valid and record.hash_algorithm in ('sha1', 'sha256', 'md5') %}
+            <form hx-post="/registry/hives/{{ hive_id }}/amcache/{{ record.record_id }}/virustotal"
+                  hx-target="#amcache-vt-{{ record.record_id }}" hx-swap="innerHTML"
+                  hx-confirm="Send only this hash to VirusTotal? No file is uploaded.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="link" {% if not vt_configured %}disabled title="Configure VirusTotal in Settings → Integrations"{% endif %}>Look up hash on VirusTotal</button>
+            </form>
+            <div id="amcache-vt-{{ record.record_id }}"></div>
+            {% if not vt_configured %}
+            <span class="muted small-note">VirusTotal not configured.</span>
+            {% endif %}
+            {% else %}
+            <span class="muted small-note">VirusTotal disabled: hash algorithm unknown</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    {% if result.page > 1 %}
+    <button type="button" class="tree-btn"
+            hx-get="/registry/hives/{{ hive_id }}/amcache?q={{ form.q|urlencode }}&exact={{ '1' if form.exact else '0' }}&page={{ result.page - 1 }}"
+            hx-target="#amcache-results" hx-swap="innerHTML">&larr; Previous</button>
+    {% endif %}
+    <span class="muted">Page {{ result.page }} of {{ result.pages or 1 }}</span>
+    {% if result.page < result.pages %}
+    <button type="button" class="tree-btn"
+            hx-get="/registry/hives/{{ hive_id }}/amcache?q={{ form.q|urlencode }}&exact={{ '1' if form.exact else '0' }}&page={{ result.page + 1 }}"
+            hx-target="#amcache-results" hx-swap="innerHTML">Next &rarr;</button>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No Amcache record matched.</p>
+  {% endif %}
+</div>
+{% elif form.q %}
+<p class="muted">No Amcache records matched.</p>
+{% else %}
+<p class="muted small-note">Enter a filename, path, publisher, product or FileId to search Amcache records.</p>
+{% endif %}

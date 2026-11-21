@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "mappings": {
+    "/absolute/path/to/SysInternals.E01": {
+      "exposure": "/absolute/path/to/ewfmount/ewf1",
+      "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "media_size": 14720958464
+    }
+  }
+}

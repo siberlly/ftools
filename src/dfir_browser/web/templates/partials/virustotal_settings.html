@@ -1,0 +1,100 @@
+{% set status = vt_status %}
+<div class="detail-head">
+  <h2>VirusTotal</h2>
+  {% if status.configured %}
+  <span class="badge ok">Configured</span>
+  {% else %}
+  <span class="badge unalloc">Not configured</span>
+  {% endif %}
+  {% if status.source == "environment" %}
+  <span class="badge kind">Managed by environment</span>
+  {% elif status.source == "ui" %}
+  <span class="badge kind">UI secret store</span>
+  {% endif %}
+</div>
+
+{% if notice %}
+<div class="alert {% if 'Could not' in notice %}error{% else %}ok{% endif %}" role="status">{{ notice }}</div>
+{% endif %}
+
+<p class="muted small-note">
+  Hash lookups send only a hash to VirusTotal. Evidence files and extracted
+  copies are never uploaded, and this page never displays the stored key.
+</p>
+
+<dl class="file-facts">
+  <dt>Status</dt>
+  <dd>{{ "configured" if status.configured else "not configured" }}</dd>
+  <dt>Source</dt>
+  <dd>
+    {% if status.source == "environment" %}
+      environment variable <code>VT_API_KEY</code>
+    {% elif status.source == "ui" %}
+      UI secret store (<code>var/secrets/virustotal.key</code>, mode 0600)
+    {% else %}
+      none
+    {% endif %}
+  </dd>
+  <dt>Key</dt>
+  <dd>{{ status.masked if status.masked else "not set" }}</dd>
+  <dt>Environment override</dt>
+  <dd><code>VT_API_KEY</code> (takes precedence over the UI secret store)</dd>
+  <dt>Local rate limit</dt>
+  <dd>{{ status.rate_limit_per_minute }} outbound requests per minute</dd>
+  <dt>Cache</dt>
+  <dd>{{ status.cache_ttl_seconds }} seconds for found reports (404 is cached shorter)</dd>
+</dl>
+
+{% if status.source == "environment" %}
+<div class="alert warn">
+  <strong>Managed by environment.</strong>
+  <code>VT_API_KEY</code> takes precedence over any key saved here. Removing the
+  UI fallback cannot remove an environment variable.
+</div>
+{% endif %}
+
+<form class="form" hx-post="/settings/integrations/virustotal"
+      hx-target="#vt-settings-card" hx-swap="innerHTML">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="vt_api_key">{% if status.configured %}Replace API key{% else %}API key{% endif %}</label>
+  <input id="vt_api_key" name="api_key" type="password"
+         autocomplete="new-password" spellcheck="false"
+         autocapitalize="off" autocorrect="off"
+         minlength="64" maxlength="64"
+         placeholder="64 hexadecimal characters">
+  <p class="muted small-note">
+    The key is written atomically to a 0600 file in a 0700 directory and is
+    never returned to the browser after saving. It is not encrypted; Unix file
+    permissions are the protection.
+  </p>
+  <button type="submit">Save key</button>
+</form>
+
+{% if status.ui_fallback_present %}
+<form hx-post="/settings/integrations/virustotal/remove"
+      hx-target="#vt-settings-card" hx-swap="innerHTML"
+      hx-confirm="Remove the UI-stored VirusTotal key? Environment variables are not affected.">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="secondary">Remove stored key</button>
+</form>
+{% endif %}
+
+<section class="triage-block">
+  <h3>Test lookup</h3>
+  <p class="muted small-note">
+    A test sends the hash you enter to VirusTotal and uses quota. Use a hash you
+    choose; this form does not read evidence data.
+  </p>
+  <form class="form" hx-post="/settings/integrations/virustotal/test"
+        hx-target="#vt-test-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="vt_test_hash">MD5, SHA-1 or SHA-256</label>
+    <input id="vt_test_hash" name="hash_value" type="text" required
+           minlength="32" maxlength="64" autocomplete="off"
+           placeholder="hash to look up">
+    <button type="submit" {% if not status.configured %}disabled{% endif %}>
+      Test lookup
+    </button>
+  </form>
+  <div id="vt-test-result" aria-live="polite"></div>
+</section>

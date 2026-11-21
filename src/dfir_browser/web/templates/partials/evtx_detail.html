@@ -1,0 +1,110 @@
+<div class="evtx-detail-panel" data-record-id="{{ event.record_id }}">
+  <header class="dir-panel-head">
+    <div>
+      <h3 class="dir-panel-title">Event {{ event.record_id }}</h3>
+      <p class="muted path-line">
+        {{ event.channel or "unknown channel" }} &middot;
+        {{ event.provider_name or "unknown provider" }}
+        {% if event.event_id is not none %}&middot; Event ID {{ event.event_id }}{% endif %}
+      </p>
+    </div>
+    <div class="dir-panel-badges">
+      <span class="badge kind">{{ event.level_name or "level unknown" }}</span>
+      {% if event.message_status != 'available' %}<span class="badge unalloc">message_unavailable</span>{% endif %}
+      {% if event.truncated %}<span class="badge unalloc">truncated</span>{% endif %}
+    </div>
+  </header>
+
+  <dl class="file-facts">
+    <dt>Timestamp (UTC)</dt><dd>{{ event.timestamp_utc or "unknown" }}</dd>
+    {% if event.timestamp_raw and event.timestamp_raw != event.timestamp_utc %}
+    <dt>Raw timestamp</dt><dd><code>{{ event.timestamp_raw }}</code></dd>
+    {% endif %}
+    <dt>Computer</dt><dd>{{ event.computer or "unknown" }}</dd>
+    <dt>User SID</dt><dd><code>{{ event.user_sid or "not recorded" }}</code></dd>
+    <dt>Task / Opcode</dt>
+    <dd>{{ event.task if event.task is not none else "-" }} / {{ event.opcode if event.opcode is not none else "-" }}</dd>
+    <dt>Keywords</dt><dd><code>{{ event.keywords or "" }}</code></dd>
+    <dt>Process / Thread</dt>
+    <dd>{{ event.process_id if event.process_id is not none else "-" }} / {{ event.thread_id if event.thread_id is not none else "-" }}</dd>
+    <dt>Activity ID</dt><dd><code>{{ event.activity_id or "" }}</code></dd>
+    <dt>Related activity</dt><dd><code>{{ event.related_activity_id or "" }}</code></dd>
+    <dt>Version</dt><dd>{{ event.version if event.version is not none else "" }}</dd>
+    <dt>Record ID</dt><dd>{{ event.record_id }}</dd>
+    <dt>Raw XML SHA-256</dt><dd><code class="hash">{{ event.raw_xml_sha256 or "" }}</code></dd>
+  </dl>
+
+  {% if log %}
+  <p class="small-note muted">
+    Source: <code>{{ log.evidence_path }}</code>
+    &middot; MFT {{ log.inode if log.inode is not none else "unknown" }}
+    &middot; SHA-256 <code class="hash">{{ log.sha256 or "n/a" }}</code>
+  </p>
+  {% endif %}
+
+  {% if event.message %}
+  <div class="alert ok"><strong>Rendered message</strong><p>{{ event.message }}</p></div>
+  {% else %}
+  <div class="alert warn">
+    <strong>message_unavailable.</strong> This image does not include the Windows
+    message resource DLLs, so no rendered message exists. Structured EventData
+    and raw XML are shown instead; no text is generated.
+  </div>
+  {% endif %}
+
+  {% if event.event_data %}
+  <h4>EventData</h4>
+  <div class="table-wrap">
+    <table class="listing compact evtx-data">
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        {% for key, value in event.event_data.items() %}
+        <tr>
+          <td><code>{{ key }}</code></td>
+          <td class="name">
+            {% if value is string %}
+              <code class="evtx-value">{{ value }}</code>
+            {% elif value is sequence %}
+              {% for item in value %}<code class="evtx-value">{{ item }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% else %}
+              <code class="evtx-value">{{ value }}</code>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if event.user_data %}
+  <h4>UserData</h4>
+  <pre class="raw evtx-userdata">{{ event.user_data }}</pre>
+  {% endif %}
+
+  {% if event.rendering_info %}
+  <h4>RenderingInfo</h4>
+  <pre class="raw evtx-rendering">{{ event.rendering_info }}</pre>
+  {% endif %}
+
+  {% if event.parse_warnings %}
+  <div class="alert warn small-note">
+    <ul>{% for warning in event.parse_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if include_raw_xml and event.raw_xml %}
+  <h4>Raw XML{% if event.raw_xml_truncated %} (truncated){% endif %}</h4>
+  <pre class="raw evtx-raw-xml">{{ event.raw_xml }}</pre>
+  {% else %}
+  <p class="small-note muted">
+    Raw XML is hidden. Use the <strong>Raw XML</strong> action to load it
+    explicitly.
+  </p>
+  {% endif %}
+
+  <p class="small-note muted">
+    Event data is untrusted evidence. Commands, scripts and paths inside an
+    event are never executed.
+  </p>
+</div>
