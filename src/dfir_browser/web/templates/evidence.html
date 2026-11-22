@@ -50,14 +50,16 @@
       <dt>Source SHA-256</dt><dd><code class="hash">{{ record.source_sha256 or "not recorded" }}</code></dd>
       <dt>Source size</dt><dd>{{ record.source_size|filesize }} ({{ record.source_size }} bytes)</dd>
       <dt>Source mtime</dt><dd>{{ record.source_mtime_iso or record.source_mtime_ns }} ({{ record.source_mtime_ns }} ns)</dd>
-      <dt>Format</dt><dd>{{ record.format }}</dd>
+      <dt>Format</dt><dd>{{ "Logical evidence" if record.format == "AD1" else record.format }}</dd>
       <dt>Media size</dt><dd>{{ record.media_size|filesize }} ({{ record.media_size }} bytes)</dd>
+      {% if record.format != "AD1" %}
       <dt>Sector size</dt><dd>{{ record.sector_size }} bytes</dd>
+      {% endif %}
       <dt>MD5</dt><dd><code>{{ record.md5 or "not reported" }}</code></dd>
       <dt>SHA1</dt><dd><code>{{ record.sha1 or "not reported" }}</code></dd>
-      <dt>ewfinfo</dt><dd>{{ record.ewfinfo_version or "n/a" }}</dd>
+      {% if record.format != "AD1" %}<dt>ewfinfo</dt><dd>{{ record.ewfinfo_version or "n/a" }}</dd>{% endif %}
       <dt>Registered</dt><dd>{{ record.registered_at }}</dd>
-      <dt>Raw exposure</dt><dd><code>{{ exposure_path or "unavailable" }}</code></dd>
+      {% if record.format != "AD1" %}<dt>Raw exposure</dt><dd><code>{{ exposure_path or "unavailable" }}</code></dd>{% endif %}
       <dt>Exposure mode</dt><dd>{{ record.exposure_mode }}</dd>
       <dt>Exposure verified</dt><dd>{{ record.exposure_verified_at or "not recorded" }}</dd>
     </dl>
@@ -67,8 +69,8 @@
     <h2>Filesystem</h2>
     <dl>
       <dt>Scope</dt><dd>{{ record.layout.scope }}</dd>
-      <dt>Filesystem</dt><dd>{{ record.layout.filesystem or "unknown" }}</dd>
-      <dt>Offset</dt><dd>{{ record.layout.offset_sectors }} sectors</dd>
+      <dt>Filesystem</dt><dd>{{ record.layout.filesystem or ("AD1 logical tree" if record.format == "AD1" else "unknown") }}</dd>
+      {% if record.format != "AD1" %}<dt>Offset</dt><dd>{{ record.layout.offset_sectors }} sectors</dd>{% endif %}
       <dt>Detection</dt><dd>{{ record.layout.method }}</dd>
       {% if record.layout.details.volume_name %}<dt>Volume name</dt><dd>{{ record.layout.details.volume_name }}</dd>{% endif %}
       {% if record.layout.details.root_inode %}<dt>Root MFT entry</dt><dd>{{ record.layout.details.root_inode }}</dd>{% endif %}

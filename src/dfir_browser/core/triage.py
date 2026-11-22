@@ -101,12 +101,6 @@ class FileTriageService:
                 code="triage_directory_rejected",
                 details={"entry_id": entry.id},
             )
-        if entry.inode is None:
-            raise TriageRejectedError(
-                "entry has no MFT/inode and cannot be extracted for triage",
-                code="triage_entry_without_inode",
-                details={"entry_id": entry.id},
-            )
         limit = (
             max(1, int(self.settings.triage_max_concurrent_jobs))
             + max(0, int(self.settings.triage_max_queued_jobs))
@@ -266,15 +260,7 @@ class FileTriageService:
                 if reuse_note:
                     job.warnings.append(reuse_note)
             if extracted is None:
-                image = self.evidence.ensure_image(record)
-                extraction = self.filesystem.extract(
-                    image,
-                    evidence_id,
-                    inode=entry.inode,
-                    case_id=case_id,
-                    offset_sectors=record.layout.offset_sectors,
-                    assume_file=True,
-                )
+                extraction = self.filesystem.extract_entry(record, entry, case_id)
                 extracted = self._validate_extracted(
                     extraction.output_path, case_id
                 )
@@ -474,7 +460,7 @@ class FileTriageService:
                 "hash lookup only applies to files",
                 code="hash_directory_rejected",
             )
-        if entry.inode is None:
+        if entry.inode is None and entry.backend_type != "ad1":
             raise TriageRejectedError(
                 "entry has no MFT/inode and cannot be hashed",
                 code="hash_entry_without_inode",
@@ -497,15 +483,7 @@ class FileTriageService:
             "",
         )
         if extracted is None:
-            image = self.evidence.ensure_image(record)
-            extraction = self.filesystem.extract(
-                image,
-                record.evidence_id,
-                inode=entry.inode,
-                case_id=case_id,
-                offset_sectors=record.layout.offset_sectors,
-                assume_file=True,
-            )
+            extraction = self.filesystem.extract_entry(record, entry, case_id)
             extracted = self._validate_extracted(extraction.output_path, case_id)
             try:
                 os.chmod(extracted, 0o600)

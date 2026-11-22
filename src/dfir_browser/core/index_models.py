@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from .errors import DFIRError
 from .models import TRUST_LABEL
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 INDEX_STATUSES = {
     "pending",
     "running",
@@ -229,6 +229,10 @@ class IndexedEntry:
     mft_modified_time: str | None
     raw_line_hash: str | None
     parent_id: int | None = None
+    backend_type: str | None = None
+    source_ref: str | None = None
+    stored_md5: str | None = None
+    stored_sha1: str | None = None
 
     @property
     def status_label(self) -> str:
@@ -276,6 +280,10 @@ class IndexedEntry:
             basename=str(row["basename"]),
             extension=str(row["extension"] or ""),
             inode=int(row["inode"]) if row["inode"] is not None else None,
+            backend_type=row["backend_type"] if "backend_type" in keys else None,
+            source_ref=row["source_ref"] if "source_ref" in keys else None,
+            stored_md5=row["stored_md5"] if "stored_md5" in keys else None,
+            stored_sha1=row["stored_sha1"] if "stored_sha1" in keys else None,
             sequence=int(row["sequence"]) if row["sequence"] is not None else None,
             attribute_id=(
                 int(row["attribute_id"])

@@ -74,7 +74,7 @@ def services(tmp_path, monkeypatch):
             "filesystem": "NTFS",
             "offset_sectors": 0,
             "fls_version": "",
-            "index_schema_version": 2,
+            "index_schema_version": 3,
             "scanner_version": SCANNER,
         },
         "2020-01-01T00:00:00Z",

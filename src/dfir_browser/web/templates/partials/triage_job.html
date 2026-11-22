@@ -40,7 +40,7 @@
         &middot; {% if job.duration_ms is not none %}{{ "%.0f"|format(job.duration_ms) }} ms{% endif %}
         &middot; {{ job.created_at }}
         &middot; entry id {{ job.entry_id }}
-        &middot; MFT {{ job.inode if job.inode is not none else "unknown" }}
+        &middot; MFT {{ job.inode if job.inode is not none else "N/A" }}
         {% if entry %} &middot; {{ "deleted" if entry.deleted else ("allocated" if entry.allocated else "unallocated") }}{% endif %}
       </p>
       <p class="triage-sha"><strong>SHA-256</strong> <code>{{ job.sha256 or "not available" }}</code></p>

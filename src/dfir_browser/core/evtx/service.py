@@ -187,7 +187,7 @@ class EvtxService:
                 "EVTX indexing only accepts files",
                 code="evtx_directory_rejected",
             )
-        if entry.inode is None:
+        if entry.inode is None and entry.backend_type != "ad1":
             raise EvtxRejected(
                 "entry has no MFT/inode and cannot be extracted",
                 code="evtx_entry_without_inode",
@@ -517,15 +517,7 @@ class EvtxService:
                     note = "previous working copy changed; re-extracted"
         else:
             note = None
-        image = self.evidence.ensure_image(record)
-        extraction = self.filesystem.extract(
-            image,
-            record.evidence_id,
-            inode=entry.inode,
-            case_id=CASE_ID,
-            offset_sectors=record.layout.offset_sectors,
-            assume_file=True,
-        )
+        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
         extracted = self._validate_extracted(extraction.output_path)
         try:
             os.chmod(extracted, 0o600)

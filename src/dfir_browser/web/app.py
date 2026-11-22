@@ -1187,16 +1187,17 @@ def create_app(
                 )
             metadata = None
             metadata_error = None
-            try:
-                exposure = services.evidence.ensure_image(record)
-                metadata = services.filesystem.stat(
-                    exposure,
-                    record.evidence_id,
-                    inode=entry.inode,
-                    offset_sectors=record.layout.offset_sectors,
-                )
-            except USER_ERRORS as exc:
-                metadata_error = str(exc)
+            if entry.backend_type != "ad1":
+                try:
+                    exposure = services.evidence.ensure_image(record)
+                    metadata = services.filesystem.stat(
+                        exposure,
+                        record.evidence_id,
+                        inode=entry.inode,
+                        offset_sectors=record.layout.offset_sectors,
+                    )
+                except USER_ERRORS as exc:
+                    metadata_error = str(exc)
             latest_triage = None
             try:
                 latest_triage = services.triage.latest_for_entry(
@@ -1234,7 +1235,7 @@ def create_app(
                 status_code=400,
             )
 
-    @app.get(
+    @app.post(
         "/evidence/{evidence_id}/entry/{entry_id}/extract",
         response_class=HTMLResponse,
     )
@@ -1257,19 +1258,12 @@ def create_app(
                     "refusing to extract a directory as a file",
                     code="directory_extraction",
                 )
-            if entry.inode is None:
+            if entry.inode is None and entry.backend_type != "ad1":
                 raise DFIRError(
                     "this entry has no MFT/inode and cannot be extracted",
                     code="entry_without_inode",
                 )
-            exposure = services.evidence.ensure_image(record)
-            result = services.filesystem.extract(
-                exposure,
-                record.evidence_id,
-                inode=entry.inode,
-                case_id=case_id,
-                offset_sectors=record.layout.offset_sectors,
-            )
+            result = services.filesystem.extract_entry(record, entry, case_id)
         except USER_ERRORS as exc:
             return render(
                 request,

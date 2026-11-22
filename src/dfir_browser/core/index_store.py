@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS filesystem_entries (
   accessed_time TEXT,
   mft_modified_time TEXT,
   raw_line_hash TEXT
+  ,backend_type TEXT
+  ,source_ref TEXT
+  ,stored_md5 TEXT
+  ,stored_sha1 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS filesystem_parse_errors (
@@ -126,6 +130,10 @@ ADDED_COLUMNS = {
     "filesystem_entries": (
         ("parent_id", "INTEGER"),
         ("has_children", "INTEGER NOT NULL DEFAULT 0"),
+        ("backend_type", "TEXT"),
+        ("source_ref", "TEXT"),
+        ("stored_md5", "TEXT"),
+        ("stored_sha1", "TEXT"),
     ),
 }
 
@@ -133,7 +141,7 @@ ENTRY_COLUMNS = (
     "id, evidence_id, full_path, parent_path, basename, extension, inode, "
     "sequence, attribute_id, fls_type, entry_type, allocated, deleted, size, "
     "created_time, modified_time, accessed_time, mft_modified_time, "
-    "raw_line_hash"
+    "raw_line_hash, backend_type, source_ref, stored_md5, stored_sha1"
 )
 
 INSERT_ENTRY_SQL = f"""
@@ -142,7 +150,8 @@ INSERT INTO filesystem_entries (
   sequence, attribute_id, fls_type, entry_type, allocated, deleted, size,
   created_time, modified_time, accessed_time, mft_modified_time,
   raw_line_hash, parent_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  , backend_type, source_ref, stored_md5, stored_sha1
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 INSERT_PARSE_ERROR_SQL = """
@@ -530,7 +539,7 @@ class IndexStore:
             )
 
     def insert_entries(self, rows: Iterable[Sequence[Any]]) -> None:
-        rows = list(rows)
+        rows = [tuple(row) + (None, None, None, None) if len(row) == 20 else tuple(row) for row in rows]
         if not rows:
             return
         try:

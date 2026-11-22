@@ -28,7 +28,7 @@ def test_valid_evidence_path_is_canonicalised(policy_env) -> None:
 
 def test_all_supported_extensions(policy_env) -> None:
     policy, allowed, _ = policy_env
-    for name in ("a.E01", "b.e01", "c.raw", "d.img"):
+    for name in ("a.E01", "b.e01", "c.raw", "d.img", "e.ad1"):
         path = allowed / name
         path.write_bytes(b"x")
         assert policy.validate_evidence_path(str(path)) == path.resolve()
@@ -39,6 +39,14 @@ def test_unsupported_extension_rejected(policy_env) -> None:
     path = allowed / "notes.txt"
     path.write_text("x")
     with pytest.raises(PolicyError, match="unsupported"):
+        policy.validate_evidence_path(str(path))
+
+
+def test_continuation_segment_cannot_be_registered(policy_env) -> None:
+    policy, allowed, _ = policy_env
+    path = allowed / "image.ad2"
+    path.write_bytes(b"segment")
+    with pytest.raises(PolicyError, match="primary .ad1"):
         policy.validate_evidence_path(str(path))
 
 

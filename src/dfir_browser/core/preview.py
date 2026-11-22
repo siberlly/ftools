@@ -330,14 +330,15 @@ class FilePreviewService:
                 code="preview_directory_rejected",
                 details={"entry_id": entry.id},
             )
-        if entry.inode is None:
+        if entry.inode is None and entry.backend_type != "ad1":
             raise PreviewRejected(
                 "entry has no MFT/inode and cannot be extracted",
                 code="preview_entry_without_inode",
             )
         # Re-validates the MFT range (rejects negatives) through the policy.
         try:
-            self.policy.validate_inode(entry.inode)
+            if entry.inode is not None:
+                self.policy.validate_inode(entry.inode)
         except DFIRError as exc:
             raise PreviewRejected(
                 "entry has an invalid MFT/inode value",
@@ -374,7 +375,10 @@ class FilePreviewService:
                 data = json.loads(sidecar.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if int(data.get("inode", -1)) != int(entry.inode):
+            if entry.backend_type == "ad1":
+                if data.get("backend_type") != "ad1" or str(data.get("source_ref")) != str(entry.source_ref):
+                    continue
+            elif int(data.get("inode", -1)) != int(entry.inode):
                 continue
             if str(data.get("evidence_id") or "") != record.evidence_id:
                 continue
@@ -409,15 +413,7 @@ class FilePreviewService:
         existing = self._existing_copy(record, entry)
         if existing is not None:
             return existing
-        image = self.evidence.ensure_image(record)
-        extraction = self.filesystem.extract(
-            image,
-            record.evidence_id,
-            inode=entry.inode,
-            case_id=CASE_ID,
-            offset_sectors=record.layout.offset_sectors,
-            assume_file=True,
-        )
+        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
         path = self._validate_copy(Path(extraction.output_path))
         try:
             os.chmod(path, 0o600)

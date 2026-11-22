@@ -365,7 +365,7 @@ class BrowserArtifactService:
                 "browser indexing only accepts files",
                 code="browser_directory_rejected",
             )
-        if entry.inode is None:
+        if entry.inode is None and entry.backend_type != "ad1":
             raise BrowserArtifactRejected(
                 "entry has no MFT/inode and cannot be extracted",
                 code="browser_entry_without_inode",
@@ -762,15 +762,7 @@ class BrowserArtifactService:
                 note = "previous working copy changed; re-extracted"
         else:
             note = None
-        image = self.evidence.ensure_image(record)
-        extraction = self.filesystem.extract(
-            image,
-            record.evidence_id,
-            inode=entry.inode,
-            case_id=CASE_ID,
-            offset_sectors=record.layout.offset_sectors,
-            assume_file=True,
-        )
+        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
         source = Path(extraction.output_path)
         for stale in workdir.iterdir():
             if stale.is_file() and not stale.is_symlink():
@@ -784,7 +776,6 @@ class BrowserArtifactService:
 
     def _copy_sidecars(self, record, entry, workdir: Path) -> None:
         scan_id = self._scan_id(record)
-        image = self.evidence.ensure_image(record)
         for name in sidecar_names(entry):
             rows = self.index_store.find_entries_by_basename(
                 record.evidence_id, scan_id, name, 5
@@ -794,17 +785,10 @@ class BrowserArtifactService:
                  if row.full_path == f"{entry.parent_path}/{name}"),
                 None,
             )
-            if match is None or match.inode is None:
+            if match is None or (match.inode is None and match.backend_type != "ad1"):
                 continue
             try:
-                extraction = self.filesystem.extract(
-                    image,
-                    record.evidence_id,
-                    inode=match.inode,
-                    case_id=CASE_ID,
-                    offset_sectors=record.layout.offset_sectors,
-                    assume_file=True,
-                )
+                extraction = self.filesystem.extract_entry(record, match, CASE_ID)
                 target = workdir / name
                 if target.exists():
                     target.unlink()

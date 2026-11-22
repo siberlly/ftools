@@ -700,7 +700,41 @@ class EvidenceService:
         extension = source.suffix.lower()
         warnings: list[str] = []
 
-        if extension == ".e01":
+        if extension == ".ad1":
+            from .backends import AD1EvidenceBackend, ad1_open, ad1_segments, segment_manifest
+
+            segments = ad1_segments(source, self.policy.allowed_roots)
+            manifest = segment_manifest(segments)
+            if len(manifest) > AD1EvidenceBackend.max_segments:
+                raise EvidenceError("AD1 segment count exceeds the configured limit", code="ad1_segment_limit")
+            aggregate = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            fs, handles = ad1_open(str(source), manifest)
+            try:
+                logical_version = int(fs.logical_image.version)
+                if logical_version != 4:
+                    raise EvidenceError("only AD1 logical image version 4 is supported", code="ad1_version_unsupported")
+            finally:
+                for handle in handles:
+                    handle.close()
+            for item in manifest:
+                current = Path(str(item["path"])).stat()
+                if current.st_size != int(item["size"]) or current.st_mtime_ns != int(item["mtime_ns"]):
+                    raise EvidenceError("AD1 segment changed during registration", code="source_changed", details={"path": item["path"]})
+            source_sha256 = aggregate
+            media_size = sum(int(item["size"]) for item in manifest)
+            sector_size = 0
+            raw_exposure_path = None
+            exposure_mode = "ad1"
+            exposure_verified_at = utc_now_iso()
+            exposure_details = {"segments": manifest, "logical_version": logical_version, "segment_count": len(manifest)}
+            record_format = "AD1"
+            md5 = sha1 = None
+            ewfinfo_version = None
+            ewfinfo_duration_ms = 0.0
+            ewfinfo_command = {}
+            layout = Layout(scope="logical", filesystem=None, offset_sectors=0, method="dissect.evidence", details={"logical_version": logical_version}, warnings=[])
+            status = "ready"
+        elif extension == ".e01":
             result = self.runner.run(
                 ["ewfinfo", str(source)],
                 timeout=self.settings.command_timeout,
@@ -775,25 +809,26 @@ class EvidenceService:
                     "only reads it"
                 )
 
-        try:
-            layout = detect_layout(
-                self.runner, Path(raw_exposure_path), evidence_id=evidence_id
-            )
-            warnings.extend(layout.warnings)
-            if layout.details.get("sector_size"):
-                sector_size = int(layout.details["sector_size"])
-            status = "ready"
-        except FilesystemError as exc:
-            layout = Layout(
-                scope="unknown",
-                filesystem=None,
-                offset_sectors=0,
-                method="failed",
-                details={},
-                warnings=[str(exc)],
-            )
-            status = "layout_error"
-            warnings.append(f"filesystem detection failed: {exc}")
+        if extension != ".ad1":
+            try:
+                layout = detect_layout(
+                    self.runner, Path(raw_exposure_path), evidence_id=evidence_id
+                )
+                warnings.extend(layout.warnings)
+                if layout.details.get("sector_size"):
+                    sector_size = int(layout.details["sector_size"])
+                status = "ready"
+            except FilesystemError as exc:
+                layout = Layout(
+                    scope="unknown",
+                    filesystem=None,
+                    offset_sectors=0,
+                    method="failed",
+                    details={},
+                    warnings=[str(exc)],
+                )
+                status = "layout_error"
+                warnings.append(f"filesystem detection failed: {exc}")
 
         try:
             final_stat = source.stat()
@@ -896,6 +931,24 @@ class EvidenceService:
                     "actual_mtime_ns": source_stat.st_mtime_ns,
                 },
             )
+
+        if record.extension == ".ad1":
+            from .backends import ad1_segments
+
+            try:
+                paths = ad1_segments(source, self.policy.allowed_roots)
+                expected = record.exposure_details.get("segments") or []
+                if len(paths) != len(expected):
+                    raise EvidenceAccessError("AD1 segment set changed since registration", code="source_changed")
+                for path, pinned in zip(paths, expected):
+                    current = path.stat()
+                    if str(path) != str(pinned.get("path")) or current.st_size != int(pinned.get("size", -1)) or current.st_mtime_ns != int(pinned.get("mtime_ns", -1)):
+                        raise EvidenceAccessError("AD1 segment changed since registration", code="source_changed", details={"path": str(path)})
+            except EvidenceAccessError:
+                raise
+            except Exception as exc:
+                raise EvidenceAccessError(f"AD1 segments are unavailable: {exc}", code="ad1_segment_missing") from exc
+            return source
 
         if record.exposure_mode == "direct":
             if record.media_size != record.source_size:

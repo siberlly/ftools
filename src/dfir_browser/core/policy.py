@@ -8,7 +8,7 @@ from typing import Sequence
 
 from .errors import DFIRError
 
-EVIDENCE_EXTENSIONS = {".e01", ".raw", ".img"}
+EVIDENCE_EXTENSIONS = {".e01", ".raw", ".img", ".ad1"}
 EVIDENCE_ID_RE = re.compile(r"^ev_[0-9a-f]{12}$")
 CASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 INODE_RE = re.compile(r"^(?:0|[1-9][0-9]{0,14})$")
@@ -62,9 +62,11 @@ class SecurityPolicy:
 
         if not resolved.is_file():
             raise PolicyError("evidence path must point to a regular file")
+        if resolved.suffix.lower() == ".ad2" or resolved.suffix.lower() in {".ad3", ".ad4"}:
+            raise PolicyError("register the primary .ad1 segment, not a continuation segment")
         if resolved.suffix.lower() not in EVIDENCE_EXTENSIONS:
             raise PolicyError(
-                "unsupported evidence extension; expected .E01, .raw or .img"
+                "unsupported evidence extension; expected .E01, .raw, .img or .ad1"
             )
         if not self._within_allowed_roots(resolved):
             roots = ", ".join(str(root) for root in self.allowed_roots)

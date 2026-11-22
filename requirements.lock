@@ -10,6 +10,7 @@ cryptography==50.0.2
 defusedxml==0.7.1
 dissect.cstruct==4.7
 dissect.esedb==3.18
+dissect.evidence==3.13
 dissect.util==3.24
 fastapi==0.165.0
 h11==0.16.0

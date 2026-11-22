@@ -245,7 +245,7 @@ class MetadataResult:
 class ExtractionResult:
     evidence_id: str
     case_id: str
-    inode: int
+    inode: int | None
     name: str | None
     output_path: str
     relative_path: str

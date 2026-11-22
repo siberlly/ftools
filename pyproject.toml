@@ -22,6 +22,7 @@ dependencies = [
   "evtx>=0.15,<1",
   "defusedxml>=0.7.1,<1",
   "dissect.esedb>=3.18,<4",
+  "dissect.evidence>=3.13,<4",
 ]
 
 [project.optional-dependencies]

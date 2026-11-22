@@ -572,3 +572,87 @@ class FilesystemService:
             self._logger.exception("could not write extraction audit event")
 
         return extraction
+
+    def extract_indexed(self, record, entry, case_id: str) -> ExtractionResult:
+        """Extract an indexed non-TSK entry through its evidence backend."""
+        if entry.entry_type != "file":
+            raise ExtractionError("refusing to extract a directory as a file", code="directory_extraction")
+        if entry.backend_type != "ad1" or not entry.source_ref:
+            if entry.inode is None:
+                raise ExtractionError("entry has no usable source reference", code="source_ref_missing")
+            image = self.settings.var_dir  # unused; preserve the TSK path below
+            raise ExtractionError("use the TSK extraction path for inode backed entries", code="backend_mismatch")
+        from .backends import AD1EvidenceBackend, BackendError
+        import hashlib
+        import time
+
+        case_id = self.policy.validate_case_id(case_id)
+        exports = self.policy.case_exports_dir(case_id)
+        filename = self.policy.build_export_filename(int(entry.id), entry.basename)
+        output_path = self._claim_output(exports, filename)
+        md5, sha1, sha256 = hashlib.md5(), hashlib.sha1(), hashlib.sha256()
+        size = 0
+        deadline = time.monotonic() + float(self.settings.extract_timeout)
+        max_bytes = max(1, int(getattr(self.settings, "extract_max_bytes", 2 * 1024**3)))
+        try:
+            with AD1EvidenceBackend().open_entry(record, entry.source_ref) as source:
+                fd = os.open(output_path, os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0))
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as target:
+                    while True:
+                        if time.monotonic() > deadline:
+                            raise ExtractionError("AD1 extraction timed out", code="extract_timeout")
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise ExtractionError("extracted file exceeds the configured size limit", code="extract_size_limit")
+                        target.write(chunk)
+                        md5.update(chunk); sha1.update(chunk); sha256.update(chunk)
+                    target.flush(); os.fsync(target.fileno())
+        except Exception:
+            output_path.unlink(missing_ok=True)
+            raise
+        warnings = []
+        if entry.size is not None and int(entry.size) != size:
+            warnings.append(f"extracted size {size} differs from AD1 metadata size {entry.size}")
+        verified = None
+        for label, expected, actual in (("MD5", entry.stored_md5, md5.hexdigest()), ("SHA1", entry.stored_sha1, sha1.hexdigest())):
+            if expected:
+                verified = True if verified is None else verified
+            if expected and expected.lower() != actual.lower():
+                verified = False
+                warnings.append(f"STORED {label} MISMATCH: expected {expected}, computed {actual}")
+        result = ExtractionResult(record.evidence_id, case_id, None, entry.basename, str(output_path.resolve()),
+            str(output_path.resolve().relative_to(self.settings.var_dir)), size, sha256.hexdigest(),
+            entry.size, "dissect.evidence", utc_now_iso(), True, warnings, {})
+        payload = result.to_dict()
+        payload.update({"backend_type": "ad1", "primary_ad1_path": record.resolved_source_path,
+            "segments": record.exposure_details.get("segments", []), "entry_id": entry.id,
+            "source_ref": entry.source_ref, "logical_path": entry.full_path,
+            "stored_md5": entry.stored_md5, "stored_sha1": entry.stored_sha1,
+            "computed_md5": md5.hexdigest(), "computed_sha1": sha1.hexdigest(),
+            "integrity_verified": verified, "extracted_size": size, "untrusted": True})
+        sidecar = output_path.with_name(output_path.name + ".provenance.json")
+        with open(sidecar, "x", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True); handle.write("\n")
+        os.chmod(sidecar, 0o600)
+        return result
+
+    def extract_entry(self, record, entry, case_id: str) -> ExtractionResult:
+        if entry.backend_type == "ad1":
+            return self.extract_indexed(record, entry, case_id)
+        from .backends import TskEvidenceBackend
+        if entry.inode is None:
+            raise ExtractionError("entry has no MFT/inode", code="source_ref_missing")
+        return TskEvidenceBackend().extract_entry(self, record, entry, case_id)
+
+    def _image_for(self, record) -> Path:
+        # Kept as a seam for callers that already have an evidence service.
+        resolver = getattr(self, "evidence", None)
+        if resolver is not None:
+            return resolver.ensure_image(record)
+        if record.raw_exposure_path:
+            return Path(record.raw_exposure_path)
+        return self.policy.validate_evidence_path(record.resolved_source_path)

@@ -246,7 +246,7 @@ def test_schema_v1_is_upgraded_and_preserves_rows(tmp_path: Path) -> None:
     store.ensure_schema()
     upgrade = sqlite3.connect(path)
     try:
-        assert upgrade.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert upgrade.execute("PRAGMA user_version").fetchone()[0] == 3
         nulls = upgrade.execute(
             "SELECT COUNT(*) FROM filesystem_entries WHERE parent_id IS NULL"
         ).fetchone()[0]

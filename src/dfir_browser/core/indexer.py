@@ -144,14 +144,15 @@ class FilesystemIndexer:
     def _expected_identity(
         self, record, fls_version: str | None = None
     ) -> dict[str, Any]:
-        version = self._fls_version() if fls_version is None else fls_version
+        is_ad1 = getattr(record, "extension", "") == ".ad1"
+        version = ("dissect.evidence-ad1-v1" if is_ad1 else self._fls_version()) if fls_version is None else fls_version
         return {
             "source_sha256": record.source_sha256 or "",
-            "raw_exposure_path": record.raw_exposure_path or "",
+            "raw_exposure_path": record.raw_exposure_path or (record.resolved_source_path if is_ad1 else ""),
             "filesystem": record.layout.filesystem or "",
             "offset_sectors": int(record.layout.offset_sectors or 0),
             "index_schema_version": INDEX_SCHEMA_VERSION,
-            "scanner_version": self.settings.index_scanner_version,
+            "scanner_version": "ad1-logical-v1" if is_ad1 else self.settings.index_scanner_version,
             "fls_version": version or "",
         }
 
@@ -272,9 +273,16 @@ class FilesystemIndexer:
         )
 
     def status_for_record(self, record) -> IndexStatus:
-        return self._build_status(
+        status = self._build_status(
             record, self.store.get_index_row(record.evidence_id)
         )
+        if getattr(record, "extension", "") == ".ad1":
+            try:
+                self.evidence.ensure_image(record)
+            except Exception as exc:
+                status = replace(status, stale=True, queryable=False, complete=False,
+                    warning=f"AD1 segment identity changed or unavailable; rebuild required ({getattr(exc, 'code', 'ad1_segment_unavailable')}).")
+        return status
 
     def status(self, evidence_id: str) -> IndexStatus:
         return self.status_for_record(self.evidence.get(evidence_id))
@@ -443,7 +451,7 @@ class FilesystemIndexer:
 
                 image = self.evidence.ensure_image(record)
 
-                fls_version = self._fls_version() or ""
+                fls_version = ("dissect.evidence-ad1-v1" if getattr(record, "extension", "") == ".ad1" else self._fls_version()) or ""
                 identity = self._expected_identity(record, fls_version)
                 scan_id = uuid.uuid4().hex
                 started_at = utc_now_iso()
@@ -664,6 +672,8 @@ class FilesystemIndexer:
         image: Path,
         scan_id: str,
     ) -> _ScanOutcome:
+        if getattr(record, "extension", "") == ".ad1":
+            return self._scan_ad1(handle, record, scan_id)
         argv = list(self.settings.index_fls_command)
         offset = int(record.layout.offset_sectors or 0)
         if offset > 0:
@@ -768,6 +778,10 @@ class FilesystemIndexer:
                     entry.atime,
                     entry.ctime,
                     raw_hash,
+                    None,
+                    "tsk",
+                    None,
+                    None,
                     None,
                 )
             )
@@ -976,6 +990,69 @@ class FilesystemIndexer:
             error_message=error_message,
             current_path=current_path,
         )
+
+    def _scan_ad1(self, handle: _ScanHandle, record, scan_id: str) -> _ScanOutcome:
+        from .backends import AD1EvidenceBackend
+
+        start = time.monotonic()
+        entries_seen = entries_indexed = 0
+        files = directories = 0
+        deleted_files = deleted_directories = 0
+        current_path = None
+        batch = []
+        status, error_code, error_message = "ready", None, None
+        argv = ["dissect.evidence.AD1", record.resolved_source_path]
+        try:
+            for item in AD1EvidenceBackend().iter_entries(record):
+                if handle.stop_event.is_set():
+                    status, error_code, error_message = "interrupted", "interrupted", "index scan canceled"
+                    break
+                if time.monotonic() - start > self.settings.index_timeout:
+                    status, error_code, error_message = "failed", "index_timeout", "AD1 index deadline exceeded"
+                    break
+                entries_seen += 1
+                if entries_seen > self.settings.index_max_entries:
+                    status, error_code, error_message = "incomplete", "index_entry_limit", "AD1 entry limit reached"
+                    break
+                current_path = item.path[:512]
+                parent = item.parent_path
+                basename = item.name
+                extension = Path(basename).suffix.lower().lstrip(".")
+                batch.append((handle.evidence_id, scan_id, item.path, parent, basename, extension,
+                    None, None, None, item.item_type, item.entry_type, int(item.allocated), int(item.deleted), item.size,
+                    item.created, item.modified, item.accessed, item.metadata_changed,
+                    hashlib.sha256((item.source_ref + item.path).encode("utf-8", "replace")).hexdigest(),
+                    None, "ad1", item.source_ref, item.md5, item.sha1))
+                entries_indexed += 1
+                if item.deleted and item.entry_type == "directory": deleted_directories += 1
+                elif item.deleted: deleted_files += 1
+                elif item.entry_type == "directory": directories += 1
+                else: files += 1
+                if len(batch) >= self.settings.index_batch_size:
+                    self.store.insert_entries(batch)
+                    batch.clear()
+                    self.store.update_progress(handle.evidence_id, scan_id, entries_seen=entries_seen,
+                        entries_indexed=entries_indexed, parse_errors=0, deleted_files=deleted_files,
+                        deleted_directories=deleted_directories, allocated_files=files, allocated_directories=directories,
+                        current_path=current_path)
+            if batch:
+                self.store.insert_entries(batch)
+            self.store.update_progress(handle.evidence_id, scan_id, entries_seen=entries_seen,
+                entries_indexed=entries_indexed, parse_errors=0, deleted_files=deleted_files,
+                deleted_directories=deleted_directories, allocated_files=files, allocated_directories=directories,
+                current_path=current_path)
+        except Exception as exc:
+            status = "failed"
+            error_code = getattr(exc, "code", "ad1_scan_failed")
+            error_message = str(exc)[:1000]
+        return _ScanOutcome(argv=argv, exit_code=0 if status == "ready" else 1,
+            duration_ms=(time.monotonic() - start) * 1000, timed_out=error_code == "index_timeout",
+            canceled=handle.stop_event.is_set(), limit_reached=error_code == "index_entry_limit",
+            partial_dropped=False, entries_seen=entries_seen, entries_indexed=entries_indexed,
+            parse_errors=0, deleted_files=deleted_files, deleted_directories=deleted_directories, allocated_files=files,
+            allocated_directories=directories, stdout_bytes_seen=0, stderr_bytes_seen=0,
+            stderr_truncated=False, stderr_text="", status=status, error_code=error_code,
+            error_message=error_message, current_path=current_path)
 
     def cancel_all(self) -> None:
         with self._lock:

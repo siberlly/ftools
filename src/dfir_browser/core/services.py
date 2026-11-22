@@ -101,6 +101,7 @@ def build_services(settings: Settings | None = None) -> Services:
         filesystem=filesystem,
         settings=settings,
     )
+    filesystem.evidence = evidence
     index_store = IndexStore(settings.index_database())
     index_store.ensure_schema()
     indexer = FilesystemIndexer(

@@ -1,13 +1,27 @@
 # dfir-browser
 
-Read-only DFIR file browser for disk images. One shared Python core powers a
-small FastAPI + Jinja2 + HTMX web UI, a SQLite filesystem index, and an MCP
-server over stdio.
+Read-only DFIR file browser for disk images and logical AD1 evidence. One
+shared Python core powers a small FastAPI + Jinja2 + HTMX web UI, a SQLite
+filesystem index, and an MCP server over stdio.
 
-The MVP targets a Windows NTFS volume inside an E01 image. Filesystem data is
-read through The Sleuth Kit (`fls`, `istat`, `icat`, `fsstat`, `img_stat`) with
+For E01/RAW/IMG evidence, filesystem data is read through The Sleuth Kit
+(`fls`, `istat`, `icat`, `fsstat`, `img_stat`) with
 `mmls` used only for layout detection. Evidence is never mounted read-write,
 modified, opened, or executed.
+
+AD1 logical containers are parsed through an isolated `AD1EvidenceBackend`
+using `dissect.evidence`; they are never passed to Sleuth Kit or libewf.
+Primary `.ad1` registration discovers contiguous `.ad2`, `.ad3`, ... siblings
+and pins each segment. ADCRYPT is detected and reported as unsupported.
+
+### Third-party license notice
+
+The AD1 parser dependency `dissect.evidence>=3.13,<4` is licensed under
+**AGPL-3.0-or-later**. The parser is isolated behind the evidence backend
+interface, but this dependency may impose obligations on distribution or
+network use of the combined application. The project metadata remains MIT;
+this dependency does not change that declaration. Review the AGPL terms for
+the intended deployment and distribution model.
 
 This is a hardened single-user forensic MVP, not a production multi-tenant
 service.
