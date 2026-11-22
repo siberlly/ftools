@@ -1214,6 +1214,8 @@ def create_app(
                 "latest_triage": latest_triage,
                 "registry_link": _registry_link(record, entry),
                 "preview_default_limit": services.settings.preview_default_limit,
+                "related": (services.investigation.related(record.evidence_id, entry.id)
+                            if getattr(services, "investigation", None) else {"items": [], "sources": {}}),
             }
             try:
                 context.update(_vt_context(record, entry))
@@ -1234,6 +1236,48 @@ def create_app(
                 {"error": str(exc)},
                 status_code=400,
             )
+
+    @app.get("/evidence/{evidence_id}/related/{entry_id}")
+    def related_artifacts(evidence_id: str, entry_id: int, limit: int = 100):
+        return services.investigation.related(evidence_id, entry_id, limit)
+
+    @app.get("/evidence/{evidence_id}/timeline", response_class=HTMLResponse)
+    def timeline_panel(request: Request, evidence_id: str, page: int = 1,
+                       source: str | None = None, kind: str | None = None,
+                       keyword: str | None = None, time_from: str | None = None,
+                       time_to: str | None = None, path: str | None = None,
+                       hash_value: str | None = None):
+        status = services.investigation.status(evidence_id)
+        result = services.investigation.query(evidence_id, page=page, source=source, kind=kind, keyword=keyword,
+                                              time_from=time_from, time_to=time_to, path=path, hash_value=hash_value)
+        return render(request, "partials/timeline.html", {"evidence_id": evidence_id, "status": status, "result": result,
+                      "filters": {"source": source or "", "kind": kind or "", "keyword": keyword or ""}})
+
+    @app.post("/evidence/{evidence_id}/timeline/index")
+    def timeline_start(evidence_id: str, rebuild: bool = False):
+        return services.investigation.start(evidence_id, rebuild)
+
+    @app.get("/evidence/{evidence_id}/timeline/status")
+    def timeline_status(evidence_id: str):
+        return services.investigation.status(evidence_id)
+
+    @app.get("/evidence/{evidence_id}/timeline/query")
+    def timeline_query(evidence_id: str, time_from: str | None = None, time_to: str | None = None,
+                       source: str | None = None, kind: str | None = None, keyword: str | None = None,
+                       path: str | None = None, hash_value: str | None = None, page: int = 1,
+                       page_size: int = 100, sort: str = "desc"):
+        return services.investigation.query(evidence_id, time_from=time_from, time_to=time_to,
+            source=source, kind=kind, keyword=keyword, path=path, hash_value=hash_value,
+            page=page, page_size=page_size, sort=sort)
+
+    @app.get("/evidence/{evidence_id}/timeline/event/{event_id}")
+    def timeline_event(evidence_id: str, event_id: str):
+        return services.investigation.event(evidence_id, event_id)
+
+    @app.get("/registry/amcache/{hive_id}/{record_id}", response_class=HTMLResponse)
+    def amcache_record_page(request: Request, hive_id: str, record_id: int):
+        payload = services.registry_browser.amcache_record(hive_id, record_id)
+        return render(request, "partials/amcache_record.html", {"record": payload})
 
     @app.post(
         "/evidence/{evidence_id}/entry/{entry_id}/extract",

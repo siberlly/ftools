@@ -1,0 +1,7 @@
+<section class="card"><h2>Amcache record</h2><p class="muted">Amcache metadata does not by itself prove execution.</p><dl class="file-facts">
+<dt>Executable</dt><dd>{{ record.executable_name or record.program_name or 'unknown' }}</dd>
+<dt>Path</dt><dd><code>{{ record.executable_path or 'not recorded' }}</code></dd>
+<dt>Hash</dt><dd><code>{{ record.hash_algorithm }} {{ record.hash_normalized or 'not recorded' }}</code></dd>
+<dt>Compile timestamp</dt><dd>{{ record.compile_timestamp or 'not recorded' }}</dd><dt>Key modified</dt><dd>{{ record.key_mtime or 'not recorded' }}</dd>
+<dt>First run field</dt><dd>{{ record.first_run or 'not recorded' }}</dd><dt>Last modified field</dt><dd>{{ record.last_modified or 'not recorded' }}</dd>
+<dt>Source key</dt><dd><code>{{ record.source_key_path }}</code></dd></dl></section>

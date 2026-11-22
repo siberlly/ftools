@@ -1,0 +1,22 @@
+<section class="card">
+  <header class="detail-head"><div><h3>Unified timeline</h3><p class="muted">Stored timestamps are UTC; file timestamps describe filesystem metadata and do not imply execution.</p></div>
+  {% if status.state == 'not_indexed' or status.stale %}<form method="post" action="/evidence/{{ evidence_id }}/timeline/index" hx-post="/evidence/{{ evidence_id }}/timeline/index" hx-target="#tab-content"><button type="submit">{{ 'Rebuild' if status.stale else 'Build timeline' }}</button></form>{% endif %}</header>
+  {% if status.state == 'not_indexed' %}<p>Timeline not indexed. Build it from current source indexes.</p>
+  {% elif status.state in ['queued','running'] %}<p role="status">Timeline is {{ status.state }} ({{ status.progress }}%). Refresh this tab to check progress.</p>
+  {% elif status.stale %}<div class="alert warn">A source index generation changed. Timeline data is hidden until rebuilt.</div>
+  {% elif status.state == 'error' %}<div class="alert error">Timeline build failed: {{ status.errors }}</div>
+  {% else %}
+  {% if status.errors %}<div class="alert warn">Partial timeline. Source errors: {{ status.errors }}</div>{% endif %}
+  <p>{{ result.total }} events · {{ status.skipped_timestamps }} timestamps skipped · UTC</p>
+  <form method="get" action="/evidence/{{ evidence_id }}/timeline" class="form" hx-get="/evidence/{{ evidence_id }}/timeline" hx-target="#tab-content">
+    <label>Source <select name="source"><option value="">All</option>{% for s in ['filesystem','amcache','evtx','browser'] %}<option value="{{ s }}" {% if filters.source==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+    <label>Event kind <input name="kind" value="{{ filters.kind }}"></label><label>Keyword <input name="keyword" value="{{ filters.keyword }}"></label>
+    <label>From UTC <input name="time_from" type="datetime-local"></label><label>To UTC <input name="time_to" type="datetime-local"></label>
+    <label>Path <input name="path"></label><label>Hash <input name="hash_value"></label><button>Filter</button>
+  </form>
+  {% if result['items'] %}<div class="table-wrap"><table class="listing"><thead><tr><th>Occurred at (UTC)</th><th>Kind</th><th>Source</th><th>Event</th><th>Path / summary</th><th></th></tr></thead><tbody>
+  {% for item in result['items'] %}<tr><td><time datetime="{{ item.occurred_at_utc }}">{{ item.occurred_at_utc }}</time></td><td>{{ item.timestamp_kind }}</td><td>{{ item.source_type }}</td><td>{{ item.title }}</td><td><code>{{ item.path or item.summary }}</code></td><td><a href="{{ item.source_url }}">Open source</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p>No events match these filters.</p>{% endif %}
+  <nav aria-label="Timeline pages">{% if result.page>1 %}<a href="/evidence/{{ evidence_id }}/timeline?page={{ result.page-1 }}&amp;source={{ filters.source|urlencode }}&amp;kind={{ filters.kind|urlencode }}&amp;keyword={{ filters.keyword|urlencode }}" hx-get="/evidence/{{ evidence_id }}/timeline?page={{ result.page-1 }}&amp;source={{ filters.source|urlencode }}&amp;kind={{ filters.kind|urlencode }}&amp;keyword={{ filters.keyword|urlencode }}" hx-target="#tab-content">Previous</a>{% endif %} Page {{ result.page }} · {{ result.page_size }} per page {% if result.page*result.page_size<result.total %}<a href="/evidence/{{ evidence_id }}/timeline?page={{ result.page+1 }}&amp;source={{ filters.source|urlencode }}&amp;kind={{ filters.kind|urlencode }}&amp;keyword={{ filters.keyword|urlencode }}" hx-get="/evidence/{{ evidence_id }}/timeline?page={{ result.page+1 }}&amp;source={{ filters.source|urlencode }}&amp;kind={{ filters.kind|urlencode }}&amp;keyword={{ filters.keyword|urlencode }}" hx-target="#tab-content">Next</a>{% endif %}</nav>
+  {% endif %}
+</section>

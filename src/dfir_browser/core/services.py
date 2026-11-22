@@ -24,6 +24,7 @@ from .evtx.service import EvtxService
 from .browser_artifacts.index import BrowserStore
 from .browser_artifacts.service import BrowserArtifactService
 from .preview import FilePreviewService
+from .investigation import InvestigationService
 
 
 @dataclass(slots=True)
@@ -49,9 +50,11 @@ class Services:
     browser_store: BrowserStore
     browser_artifacts: BrowserArtifactService
     preview: FilePreviewService
+    investigation: InvestigationService
 
     def cleanup(self) -> None:
         self.preview.cleanup()
+        self.investigation._pool.shutdown(wait=False, cancel_futures=True)
         self.evtx.cleanup()
         self.browser_artifacts.cleanup()
         self.registry_browser.cleanup()
@@ -184,6 +187,7 @@ def build_services(settings: Settings | None = None) -> Services:
             registry_store, evidence_id, entry_id
         )
     )
+    investigation = InvestigationService(settings, type("InvestigationDeps", (), {"indexer": indexer, "evidence": evidence})())
     return Services(
         settings=settings,
         policy=policy,
@@ -206,6 +210,7 @@ def build_services(settings: Settings | None = None) -> Services:
         browser_store=browser_store,
         browser_artifacts=browser_artifacts,
         preview=preview,
+        investigation=investigation,
     )
 
 

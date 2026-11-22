@@ -283,6 +283,51 @@ def test_real_tree_navigation(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(SKIP_REASON is not None, reason=SKIP_REASON or "")
+def test_real_vmtoolsio_timeline_correlation(tmp_path: Path) -> None:
+    """Use a SysInternals executable as anchor and cite FS metadata as source."""
+    before_stat = EVIDENCE.stat()
+    before_hash = sha256_file(EVIDENCE)
+    settings = Settings.from_env(
+        var_dir=tmp_path / "var",
+        allowed_roots=(Path("/home/ubuntu/test"), Path("/home/ubuntu/evidence")),
+        ewf_mappings={str(EVIDENCE.resolve()): EwfMapping(
+            exposure=str(EWF1.resolve()), source_sha256=before_hash,
+            media_size=14720958464)},
+        ewf_automount=False, auto_index=False, command_timeout=60.0,
+        index_timeout=240.0, index_batch_size=2000,
+    )
+    services = build_services(settings)
+    try:
+        record = services.evidence.register(str(EVIDENCE))
+        services.indexer.start_scan(record.evidence_id)
+        status = wait_for_scan(services, record, timeout=300)
+        assert status.status == "ready" and status.complete
+        query = FileSearchQuery.create(query="vmtoolsIO.exe", exact=True, page_size=20)
+        matches = services.indexer.search(record, query).results
+        assert matches, "vmtoolsIO.exe was not present in the filesystem index"
+        source_entry = matches[0]
+        assert source_entry.entry_type == "file"
+        services.investigation.start(record.evidence_id, rebuild=True)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            result = services.investigation.status(record.evidence_id)
+            if result["state"] not in {"queued", "running"}: break
+            time.sleep(.2)
+        assert result["state"] in {"ready", "partial"}, result
+        assert "filesystem" not in result["errors"], result["errors"]
+        timeline = services.investigation.query(record.evidence_id, keyword="vmtoolsIO.exe", page_size=20)
+        assert any(item["source_type"] == "filesystem" and item["source_record_id"] == str(source_entry.id)
+                   for item in timeline["items"]), "timeline omitted vmtoolsIO filesystem metadata"
+        related = services.investigation.related(record.evidence_id, source_entry.id, limit=20)
+        assert related["entry_id"] == source_entry.id
+    finally:
+        services.cleanup()
+    after_stat = EVIDENCE.stat()
+    assert (after_stat.st_size, after_stat.st_mtime_ns) == (before_stat.st_size, before_stat.st_mtime_ns)
+    assert sha256_file(EVIDENCE) == before_hash
+
+
+@pytest.mark.skipif(SKIP_REASON is not None, reason=SKIP_REASON or "")
 def test_real_static_triage(tmp_path: Path) -> None:
     """Real SysInternals.exe entry: static triage only, evidence unchanged."""
     before_stat = EVIDENCE.stat()

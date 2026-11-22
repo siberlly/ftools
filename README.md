@@ -14,6 +14,30 @@ using `dissect.evidence`; they are never passed to Sleuth Kit or libewf.
 Primary `.ad1` registration discovers contiguous `.ad2`, `.ad3`, ... siblings
 and pins each segment. ADCRYPT is detected and reported as unsupported.
 
+## Cross-source investigation
+
+The **Timeline** tab builds a SQLite snapshot from the current filesystem,
+Amcache, EVTX and browser artifact indexes. Start it from the tab or call MCP
+`start_timeline_index`; it does not rescan evidence. Results are paginated,
+filterable and carry source URLs and index generation provenance. If a source
+generation changes, timeline results are hidden as stale until rebuilt. Source
+errors are reported independently and invalid/missing timestamps are counted
+and skipped. All stored/displayed event times are UTC. Filesystem created,
+modified, accessed and metadata-change times remain distinct metadata events;
+they do not imply program execution. Amcache compile/key/first-run fields retain
+their source meaning and do not by themselves establish execution.
+
+The **Related artifacts** panel checks indexes for the same evidence only.
+Exact stored hashes and normalized full paths rank ahead of browser download
+targets and filename-only leads. A filename-only match is explicitly weak and
+is not an identity claim. Windows path matching folds case, slash direction,
+device prefixes and surrounding whitespace while preserving original values
+for display. The current MVP does not query VirusTotal or scan evidence when a
+panel opens. Source records open through the existing EVTX/browser/filesystem
+details or the Amcache record detail route. MCP tools are
+`start_timeline_index`, `get_timeline_index_status`, `query_timeline`,
+`get_timeline_event`, and `find_related_artifacts`.
+
 ### Third-party license notice
 
 The AD1 parser dependency `dissect.evidence>=3.13,<4` is licensed under

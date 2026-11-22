@@ -63,6 +63,11 @@ EXPECTED_TOOLS = {
     "browser_get_record",
     "browser_correlate_download",
     "browser_activity_summary",
+    "start_timeline_index",
+    "get_timeline_index_status",
+    "query_timeline",
+    "get_timeline_event",
+    "find_related_artifacts",
     "preview_file_content",
 }
 
@@ -72,9 +77,9 @@ def tools_by_name():
     return {tool.name: tool for tool in tools}
 
 
-def test_exactly_forty_two_tools() -> None:
+def test_tool_set_includes_timeline_and_related_artifacts() -> None:
     assert set(tools_by_name()) == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 42
+    assert len(EXPECTED_TOOLS) == 47
 
 
 def test_tool_annotations() -> None:

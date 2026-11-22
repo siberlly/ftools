@@ -92,6 +92,14 @@
   </div>
   {% endif %}
 
+  <section class="card related-artifacts">
+    <h3>Related artifacts</h3>
+    <p class="muted">Associations are based on indexed data from this evidence only. Filename-only matches are weak leads, not identity claims.</p>
+    {% if related['items'] %}<ul>{% for item in related['items'] %}<li><strong>{{ item.relationship_type|replace('_',' ') }}</strong> — Matched because {{ item.confidence_basis }}: <code>{{ item.match_value }}</code>; source {{ item.source_type }}{% if item.timestamp_utc %}; {{ item.timestamp_utc }} UTC{% endif %}. <a href="{{ item.target_url }}">Open source</a></li>{% endfor %}</ul>
+    {% else %}<p>No indexed related artifacts found.</p>{% endif %}
+    <small>Source states: {% for source, state in related.sources.items() %}{{ source }}: {{ state }}{% if state == 'not_indexed' %} (<a href="/evidence/{{ record.evidence_id }}/{{ {'amcache':'registry','evtx':'event-logs','browser':'browser'}.get(source, 'search') }}">Open source view to index</a>){% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</small>
+  </section>
+
   {% if entry.inode is not none or entry.backend_type == "ad1" %}
   <form class="form extract-form" method="post"
         action="/evidence/{{ entry.evidence_id }}/entry/{{ entry.entry_id }}/extract"

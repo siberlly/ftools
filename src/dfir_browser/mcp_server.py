@@ -1576,6 +1576,42 @@ def browser_activity_summary(
             raise _fail(exc) from exc
 
 
+@mcp.tool(name="start_timeline_index", description="Build the bounded normalized timeline from current per-source indexes. " + UNTRUSTED_NOTE, annotations=INDEX_START)
+def start_timeline_index(evidence_id: str, rebuild: bool = False) -> dict[str, Any]:
+    try:
+        return _with_trust(get_services().investigation.start(evidence_id, rebuild))
+    except USER_ERRORS as exc:
+        raise _fail(exc) from exc
+
+
+@mcp.tool(name="get_timeline_index_status", description="Get timeline progress, completeness, source generations and stale state. " + UNTRUSTED_NOTE, annotations=READ_ONLY)
+def get_timeline_index_status(evidence_id: str) -> dict[str, Any]:
+    return _with_trust(get_services().investigation.status(evidence_id))
+
+
+@mcp.tool(name="query_timeline", description="Query the normalized evidence timeline with bounded pagination and filters. " + UNTRUSTED_NOTE, annotations=READ_ONLY)
+def query_timeline(evidence_id: str, time_from: str | None = None, time_to: str | None = None,
+                   source: str | None = None, kind: str | None = None, keyword: str | None = None,
+                   path: str | None = None, hash_value: str | None = None, page: int = 1,
+                   page_size: int = 100, sort: str = "desc") -> dict[str, Any]:
+    return _with_trust(get_services().investigation.query(evidence_id, time_from=time_from, time_to=time_to,
+        source=source, kind=kind, keyword=keyword, path=path, hash_value=hash_value,
+        page=page, page_size=page_size, sort=sort))
+
+
+@mcp.tool(name="get_timeline_event", description="Get normalized event and its original-source URL. " + UNTRUSTED_NOTE, annotations=READ_ONLY)
+def get_timeline_event(evidence_id: str, event_id: str) -> dict[str, Any]:
+    return _with_trust(get_services().investigation.event(evidence_id, event_id))
+
+
+@mcp.tool(name="find_related_artifacts", description="Find bounded same-evidence indexed artifacts associated with a filesystem entry, with explicit match rationale. " + UNTRUSTED_NOTE, annotations=READ_ONLY)
+def find_related_artifacts(evidence_id: str, entry_id: int, limit: int = 100) -> dict[str, Any]:
+    try:
+        return _with_trust(get_services().investigation.related(evidence_id, entry_id, limit))
+    except USER_ERRORS as exc:
+        raise _fail(exc) from exc
+
+
 def main() -> None:
     configure_logging()
     logger.info("starting dfir-browser MCP server on stdio")
