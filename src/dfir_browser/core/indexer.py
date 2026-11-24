@@ -223,12 +223,37 @@ class FilesystemIndexer:
         elif status == "interrupted":
             warning = "Filesystem index scan was interrupted; rebuild required."
         elif status == "incomplete":
-            warning = (
-                "Filesystem index is incomplete; results may be missing entries."
-            )
+            seen = int(row.get("entries_seen") or 0)
+            indexed = int(row.get("entries_indexed") or 0)
+            code = str(row.get("error_code") or "")
+            if parse_errors and seen:
+                percent = parse_errors * 100.0 / seen
+                warning = (
+                    f"Filesystem index is incomplete: {parse_errors} of {seen} "
+                    f"entries could not be parsed ({percent:.4f}%). "
+                    f"{indexed} entries are searchable; the skipped lines are "
+                    "listed below."
+                )
+            elif code == "index_entry_limit":
+                warning = (
+                    f"Filesystem index stopped at the configured entry limit "
+                    f"({indexed} of {seen} entries indexed); later entries are "
+                    "not searchable."
+                )
+            elif code == "partial_output":
+                warning = (
+                    "Filesystem index is incomplete: the final fls output line "
+                    "was cut off and dropped; at most one entry is missing."
+                )
+            else:
+                warning = (
+                    f"Filesystem index is incomplete ({indexed} of {seen} entries "
+                    "indexed); some results may be missing."
+                )
         elif parse_errors:
             warning = (
-                "Filesystem index has parse errors; results may be missing entries."
+                f"Filesystem index has {parse_errors} parse error(s); some "
+                "results may be missing."
             )
         else:
             warning = None

@@ -1,0 +1,72 @@
+{% if error %}
+<p class="badge deleted">Table could not be read</p>
+<p class="small-note">{{ error }}</p>
+{% elif rows %}
+<div class="sqlite-row-toolbar" data-sqlite-table-name="{{ rows.table }}" data-sqlite-offset="{{ rows.offset }}">
+  <span class="small-note muted">
+    {{ rows.returned }} row(s) · offset {{ rows.offset }} · limit {{ rows.limit }}
+    {% if rows.has_more %}· more rows available{% endif %}
+    · {{ rows.columns|length }} column(s)
+  </span>
+  <span class="sqlite-row-buttons">
+    <button type="button" class="link" data-sqlite-limit="50">50 rows</button>
+    <button type="button" class="link" data-sqlite-limit="200">200 rows</button>
+    <button type="button" class="link" data-sqlite-limit="500">500 rows</button>
+    {% if rows.columns|length > 6 %}
+    <button type="button" class="link" data-sqlite-toggle-columns>All columns</button>
+    {% endif %}
+  </span>
+</div>
+<div class="table-wrap preview-sqlite-wrap">
+  <table class="listing compact preview-sqlite-table" data-sqlite-rows-table>
+    <thead>
+      <tr>
+        {% for column in rows.columns %}
+        <th class="{% if loop.index > 6 %}sqlite-extra-col{% endif %}">{{ column }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows["rows"] %}
+      <tr>
+        {% for cell in row %}
+        <td class="{% if loop.index > 6 %}sqlite-extra-col{% endif %}">
+          {% if cell.kind == 'null' %}<span class="muted">NULL</span>
+          {% elif cell.kind == 'blob' %}
+            {% if cell.full %}
+            <details class="cell-expand">
+              <summary><code>{{ cell.text }}</code>{% if cell.length > 32 %}…{% endif %}</summary>
+              <div class="cell-full"><code>{{ cell.full }}</code>{% if cell.full_truncated %}<span class="muted"> (hex truncated; {{ cell.length }} bytes total)</span>{% endif %}</div>
+            </details>
+            {% else %}<code>{{ cell.text }}</code>{% endif %}
+          {% else %}
+            {% if cell.full %}
+            <details class="cell-expand">
+              <summary>{{ cell.text }}…</summary>
+              <div class="cell-full">{{ cell.full }}{% if cell.full_truncated %}<span class="muted"> (value truncated at {{ cell.full|length }} chars; {{ cell.length }} total)</span>{% endif %}</div>
+            </details>
+            {% else %}{{ cell.text }}{% endif %}
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="entry-actions">
+  {% if rows.offset > 0 %}
+  <button type="button" class="link"
+          data-sqlite-page="{{ rows.table }}" data-sqlite-offset="{{ [rows.offset - rows.limit, 0]|max }}">Previous</button>
+  {% endif %}
+  {% if rows.has_more %}
+  <button type="button" class="link"
+          data-sqlite-page="{{ rows.table }}" data-sqlite-offset="{{ rows.offset + rows.limit }}">Next</button>
+  {% endif %}
+  <span class="muted small-note">
+    Values longer than the cell limit expand inline; BLOBs show hex.
+  </span>
+</div>
+{% else %}
+<p class="muted small-note">No rows.</p>
+{% endif %}

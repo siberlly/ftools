@@ -881,3 +881,53 @@ def test_search_all_groups_sections(tmp_path):
         assert found["trust"] == "untrusted_evidence_data"
     finally:
         services.cleanup()
+
+
+def test_linux_and_snap_profile_paths_are_detected(tmp_path):
+    """Firefox/Chromium profiles on Linux and snap must be discovered."""
+    from browser_helpers import build_browser_services
+
+    rows = [
+        (
+            "home/rafael/snap/firefox/common/.mozilla/firefox/abc.default/"
+            "places.sqlite",
+            "places.sqlite",
+            700,
+            5242880,
+            False,
+        ),
+        (
+            "home/rafael/.mozilla/firefox/xyz.default-release/places.sqlite",
+            "places.sqlite",
+            701,
+            4096,
+            False,
+        ),
+        (
+            "home/rafael/.config/google-chrome/Default/History",
+            "History",
+            702,
+            4096,
+            False,
+        ),
+        (
+            "home/rafael/snap/chromium/common/chromium/Profile 1/History",
+            "History",
+            703,
+            4096,
+            False,
+        ),
+    ]
+    services, record = build_browser_services(tmp_path, rows=rows)
+    try:
+        page = services.browser_artifacts.list_artifacts(record)
+        found = {(item.browser, item.profile_name) for item in page.items}
+        assert ("firefox", "abc.default") in found
+        assert ("firefox", "xyz.default-release") in found
+        assert ("chromium", "Default") in found
+        assert ("chromium", "Profile 1") in found
+        for item in page.items:
+            assert item.confidence >= 0.9
+            assert "Linux/snap" in item.reason
+    finally:
+        services.cleanup()

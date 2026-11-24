@@ -76,6 +76,11 @@ service.
   normalization, search and hash comparison against static triage.
 - **Windows EVTX Explorer**: discover `.evtx` logs from the filesystem index,
   index and query events offline, with transparent investigation presets.
+- **Recycle Bin deletion metadata**: `$I`/`$R` pairing, real deletion time,
+  original path and size, owner SID.
+- **ShellBags Explorer**: folder/device access history from `UsrClass.dat` and
+  `NTUSER.DAT`, including MTP device trees that regipy shows as
+  `<UNKNOWN: 0x00>`.
 - **Read-only file content preview** in the Browse panel: text, log, config,
   XML, JSON, CSV, extension-less files (`hosts`, `services`, `networks`,
   `protocol`), source code, PowerShell history and batch files as plain text,
@@ -676,9 +681,11 @@ fetched, resolved or executed, and no browsing data is ever sent anywhere.
 | Microsoft Edge (Chromium) | `History` | `Users/<user>/AppData/Local/Microsoft/Edge/User Data/<profile>/History` | SQLite (`sqlite3`) |
 | Google Chrome | `History` | `Users/<user>/AppData/Local/Google/Chrome/User Data/<profile>/History` | SQLite (`sqlite3`) |
 | Mozilla Firefox | `places.sqlite` | `Users/<user>/AppData/Roaming/Mozilla/Firefox/Profiles/<profile>/` | SQLite (`sqlite3`) |
+| Mozilla Firefox (Linux) | `places.sqlite` | `~/.mozilla/firefox/<profile>/`, `~/snap/firefox/common/.mozilla/firefox/<profile>/` | SQLite (`sqlite3`) |
+| Chromium (Linux) | `History` | `~/.config/google-chrome/<profile>/`, `~/.config/chromium/<profile>/`, `snap/chromium/.../User Data/<profile>/` | SQLite (`sqlite3`) |
 
 Discovery is driven by the filesystem index and limited to those known
-profile paths; the whole evidence is never signature-scanned. Each expected
+profile paths (Windows, Linux and snap layouts); the whole evidence is never signature-scanned. Each expected
 artifact type is reported as `indexed`, `present` (found but not indexed) or
 `not_present`, so a missing Chrome/Firefox profile is a clear result rather
 than an error. Each candidate
@@ -845,6 +852,36 @@ never malware verdicts.
   `downloads` empty, or the browser version uses a different schema; check the
   artifact warnings.
 
+### Credential stores (metadata only)
+
+The explorer shows a **Credential stores** card for each profile. It reports
+which credential files exist next to the browser profile and how many records
+they hold:
+
+| Store | Reported |
+| --- | --- |
+| `logins.json`, `logins-backup.json` | login count + hostnames only |
+| `key4.db`, `key3.db`, `cert9.db` | presence and size only |
+| `cookies.sqlite` | cookie count + distinct hosts |
+| `formhistory.sqlite` | record count + field names |
+| Chromium `Login Data`, `Web Data`, `Cookies`, `Local State` | count + hosts/field names, or presence only |
+
+**Nothing secret is read.** Passwords, usernames, cookie values, encrypted
+blobs, NSS keys and tokens are never decrypted or returned; the JSON payloads
+contain only counts and host/field names. A regression test inserts synthetic
+secrets and asserts they never appear in the response.
+
+Endpoints: `GET /evidence/{id}/browser/credentials?artifact_id=` (HTML) and
+`.../credentials/api`. MCP: `browser_credential_stores`.
+
+### Evidence isolation
+
+Every downloads/history/cache query and the activity summary are scoped to the
+selected evidence (through its artifacts), so opening one case never shows
+records from another evidence that shares the same index database. This is
+covered by a regression test that inserts a second evidence's records and
+asserts they are not returned.
+
 ## Read-only file content preview
 
 Selecting a file in **Browse** shows a collapsible **Preview content** panel
@@ -947,6 +984,296 @@ content itself.
 - **`preview_mode: hex` for a text file** – the content looked binary (NUL or
   control bytes). Use `mode=text` to force a text decode.
 - **`registry` with a short header** – expected: only the header is inspected.
+
+## Recycle Bin deletion metadata
+
+Opening the `$Recycle.Bin/<SID>/` directory adds a **Deleted at (UTC)** column
+to the file listing, with the original path under it, so the deletion time is
+visible without opening each file.
+
+Selecting a `$I` or `$R` file under `$Recycle.Bin/<SID>/` adds a **Recycle Bin
+metadata** card at the top of the Browse detail panel (above the metadata and
+preview sections). Windows stores a small `$I` record
+next to the deleted content (`$R`), and that record is the only source that
+carries the real deletion time.
+
+| Field | Source |
+| --- | --- |
+| Deleted at (UTC) | `$I` header FILETIME |
+| Original path | `$I` UTF-16LE path |
+| Original size | `$I` header |
+| Owner SID | Recycle directory name |
+| `$I` version | `$I` header (v1 or v2) |
+| `$R` content entry | sibling `$R` file in the same directory |
+
+Version 1 `$I` files store a fixed 520-character path with no length field;
+version 2 stores a length prefix plus the path (often including a trailing NUL,
+which is normal and not reported as a defect). Unknown versions, short records,
+implausible FILETIMEs and invalid UTF-16 are reported as warnings instead of
+failing the request.
+
+Important distinctions shown in the UI:
+
+- The **deletion time** comes only from `$I`. Filesystem timestamps (created,
+  modified, MFT modified, accessed) are shown separately under *Indexed
+  timestamps* and are **not** the deletion time.
+- If the `$R` content is gone, the panel says so instead of guessing.
+- Only the `$I` header is read from an extracted working copy; `$R` content is
+  never opened. The existing preview panel can still show it separately if the
+  analyst asks.
+
+### Recycle endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/evidence/{id}/recycle/{entry_id}` | HTMX panel |
+| GET | `/evidence/{id}/recycle/{entry_id}/json` | structured metadata |
+
+Bounded by `DFIR_RECYCLE_MAX_INFO_BYTES` (default 64 KiB). Directories,
+non-recycle entries and unknown evidence IDs are rejected with a structured
+error. No shell command, no path input, and no write to the evidence.
+
+## ShellBags Explorer
+
+ShellBags are recovered from the `BagMRU` keys that Windows writes into
+`UsrClass.dat` (per-user, `...\Local Settings\Software\Microsoft\Windows\Shell\BagMRU`)
+and `NTUSER.DAT` (`Software\Microsoft\Windows\Shell\BagMRU`). The
+**ShellBags** tab parses them automatically: hives are discovered from the
+filesystem index, extracted read-only and parsed offline. No registry export
+and no manual command is needed.
+
+### What is recovered
+
+| Field | Source |
+| --- | --- |
+| Folder / device tree | nested `BagMRU` subkeys |
+| Full path | shell item names joined through the BagMRU hierarchy |
+| Name | documented shell item layouts, else embedded UTF-16 data |
+| Last write (UTC) | the `BagMRU` registry key's last-write time |
+| Embedded timestamps | `0xBEEF` shell item extension, when present |
+| Drive / volume label | item type `0x2F` |
+| Device kind / path | MTP (`6ac27878-...`), USB (`usb#vid_...`), portable |
+| User SID | `S-1-5-21-..._Classes` prefix of the hive path |
+
+### MTP and portable devices
+
+Portable-device storage and folders are stored as shell item **type `0x00`**.
+Libraries such as regipy render these as `<UNKNOWN: 0x00>`. This parser reads
+the raw item bytes instead and recovers the names, so the tree is preserved:
+
+```
+My Computer
+  LG Q7                      (type 0x2E, MTP over USB)
+    Internal storage         (type 0x00)
+      DCIM                   (type 0x00)
+        Camera               (type 0x00)
+```
+
+Items whose bytes contain no readable name are still shown, labelled
+`(unnamed <type>)`, with the registry value index and a warning. Names are
+never invented.
+
+### Interface
+
+- **Devices** list with kind, drive letter, volume label and item count.
+- **Tree** with drill-down and breadcrumb navigation.
+- **Search** by name/path, kind (device/folder/file), user SID, device and
+  `datetime-local` range on the BagMRU last-write time.
+- **Detail** panel: full path, shell item type, name source, embedded
+  timestamps, exact hive/key/value and a button that opens the BagMRU key in
+  the Registry Explorer.
+- **Export** JSON or CSV (bounded by `DFIR_SHELLBAG_EXPORT_MAX_ROWS`).
+
+### Interpretation rules
+
+ShellBags record that a folder or device was **viewed in Explorer**. They are
+strong evidence of access to a location, but they do **not** prove that a file
+was copied, opened, deleted or exfiltrated. The UI and the export payload both
+state this. The `BagMRU` last-write time is when the shellbag entry was last
+updated, not necessarily when the folder was opened.
+
+### ShellBags endpoints and tools
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/evidence/{id}/shellbags` | tab |
+| POST | `/evidence/{id}/shellbags/index` | build/rebuild (CSRF) |
+| GET | `/evidence/{id}/shellbags/status` | index state |
+| GET | `/evidence/{id}/shellbags/tree` | tree fragment |
+| GET | `/evidence/{id}/shellbags/devices` | device list |
+| GET | `/evidence/{id}/shellbags/search` | search fragment |
+| GET | `/shellbags/nodes/{node_id}` | node detail |
+| GET | `/evidence/{id}/shellbags/export?format=json|csv` | export |
+| GET | `/evidence/{id}/shellbags/api/{tree,devices,search}` | JSON API |
+
+MCP tools: `shellbags_index_start`, `shellbags_index_status`,
+`shellbags_list_devices`, `shellbags_tree`, `shellbags_search`,
+`shellbags_get_node`.
+
+### Resource limits
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DFIR_SHELLBAG_DB` | `<var_dir>/cases/shellbags.db` | index database |
+| `DFIR_SHELLBAG_INDEX_TIMEOUT` | `300` | job deadline (seconds) |
+| `DFIR_SHELLBAG_MAX_NODES` | `50000` | node cap per evidence |
+| `DFIR_SHELLBAG_PAGE_SIZE_MAX` | `500` | maximum page size |
+| `DFIR_SHELLBAG_MAX_QUERY_LENGTH` | `256` | search text cap |
+| `DFIR_SHELLBAG_EXPORT_MAX_ROWS` | `10000` | export row cap |
+| `DFIR_SHELLBAG_AUTO_INDEX` | `1` | parse on first tab open |
+
+### Limitations
+
+- Only `UsrClass.dat` and `NTUSER.DAT` are parsed; `ShellNoRoam` keys are read
+  when present.
+- Deleted shellbag records that were overwritten in the hive are not recovered.
+- Embedded `0xBEEF` timestamp ordering varies by Windows version.
+- A hive is parsed only up to `DFIR_SHELLBAG_MAX_NODES` and the job deadline.
+- No cross-check against LNK or Jump Lists is performed automatically; use the
+  existing timeline/related-artifacts views.
+
+## Whole-disk images (GPT/MBR)
+
+Some acquisitions are whole-disk images rather than a single volume. The
+filesystem is then on a partition, so `fsstat` at sector 0 finds no filesystem.
+That is **not** corruption and registration no longer fails with
+`exposure_fsstat_failed`:
+
+1. The exposure is accepted when a partition table is present.
+2. `detect_layout` runs `mmls`, probes every data partition with `fsstat`, then:
+   - prefers an **NTFS** volume (Windows disks);
+   - otherwise takes the **largest non-EFI** data partition (Linux/macOS root).
+3. The chosen partition offset is stored in the layout and used by every later
+   `fls` / `istat` / `icat` call, so the tree, triage and preview all target the
+   correct volume.
+
+The evidence page and the layout warnings show which partition was selected and
+which candidates were rejected.
+
+### Image preview
+
+Raster images are rendered inline instead of dumped as hex:
+
+| Format | Detection |
+| --- | --- |
+| PNG, JPEG, GIF, BMP, WebP, TIFF | magic bytes only, with width/height parsed from the header |
+
+- The panel shows the image, format, pixel size, byte size and a short hash.
+- Bytes are served by `GET /evidence/{id}/entries/{entry_id}/image` with
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+  'none'; sandbox` and `Cache-Control: no-store`.
+- Only those raster formats are ever served. **SVG is never rendered as an
+  image** (it can carry script); it stays in the text view. Other formats fall
+  back to hex.
+- Images larger than `DFIR_PREVIEW_MAX_IMAGE_BYTES` (default 32 MiB) are not
+  inlined; the panel shows hex with an explicit warning.
+
+### Viewing content that is too large
+
+Preview is bounded, but nothing is silently cut off — every limit is reported
+and there is a way past it:
+
+| Situation | What the panel offers |
+| --- | --- |
+| File larger than the requested range | **Load next** (same size), **Load 256 KiB**, **Load 1 MiB** |
+| More than `DFIR_PREVIEW_TEXT_MAX_LINES` (10 000) lines | The next offset is computed from the last shown line, so paging continues instead of stopping at the line cap |
+| Want the whole file at once | **Download full copy** — streams the extracted working copy (bounded by `DFIR_PREVIEW_MAX_DOWNLOAD_BYTES`, default 512 MiB) with `Content-Disposition: attachment` and `nosniff` |
+| SQLite cell longer than `DFIR_PREVIEW_SQLITE_CELL_CHARS` | Truncated in the grid, full value up to 2 000 chars in the cell tooltip |
+
+The download route `GET /evidence/{id}/entries/{entry_id}/download` only ever
+serves the validated working copy inside the case export directory; the caller
+cannot supply a path. Too-large downloads return
+`preview_download_too_large` with the exact size and limit.
+
+### SQLite preview
+
+Files whose header is `SQLite format 3\0` open in a database view instead of
+hex:
+
+- schema list (tables and views), column names/types, primary-key markers and a
+  row count capped at 1000 (`1000+` beyond that);
+- `PRAGMA page_size`, `encoding`, `user_version`, `journal_mode`;
+- **Show rows** per table renders a paginated read-only grid. The row toolbar
+  offers 50 / 200 / 500 rows, and **All columns** reveals columns hidden beyond
+  the first six. Long cells render as an inline expander: click the summary to
+  read the full value in the browser (text up to
+  `DFIR_PREVIEW_SQLITE_CELL_FULL_CHARS`, default 4 000 chars; BLOBs as hex), no
+  extra request and no navigation away from the table.
+
+Safety:
+
+- opened with `mode=ro&immutable=1` and `PRAGMA query_only=1`, so the working
+  copy is never written and WAL files are not replayed;
+- the table name must already exist in `sqlite_master`; identifiers are quoted
+  and `LIMIT`/`OFFSET` are bound parameters, so no SQL injection surface;
+- `sqlite3.set_progress_handler` aborts a query that exceeds
+  `DFIR_PREVIEW_SQLITE_TIMEOUT`; rows, tables, columns and cell length are
+  capped by `DFIR_PREVIEW_SQLITE_*` settings.
+
+Endpoints: `GET /evidence/{id}/entries/{entry_id}/sqlite?table=&offset=&limit=`
+(JSON) and `.../sqlite/panel` (HTMX fragment). MCP: `preview_sqlite_table`.
+
+### Symbolic links
+
+`/etc/os-release` on Linux is usually a **symlink** to `../usr/lib/os-release`;
+`icat` on the link inode returns zeros, not the target text. `istat` does report
+``symbolic link to: …``, so preview resolves the link inside the evidence:
+
+- relative targets are resolved against the link's directory, ``..`` segments
+  are normalised, and the result must stay inside the evidence;
+- if the target is in the filesystem index it is previewed, with a warning that
+  the content came from the link target;
+- an escaping target, a link chain or a target missing from the index returns
+  ``preview_mode: symlink`` with a reason instead of empty bytes.
+
+The same resolution is used by **Extract file** and static triage, so extracting
+``/etc/os-release`` writes the real 373-byte target instead of 21 zero bytes.
+(Ext4 `istat` does not expose a file name, so the export is named
+``..._file.bin``; the content and hash are correct.)
+
+### Ext4 / Unix filesystems
+
+`istat` uses a different layout on Ext4 (``inode:``, ``mode:``, ``size:``
+instead of the NTFS ``Entry: … Sequence: …`` header). The parser handles both,
+so preview, extraction, triage and the tree work on Ext4 partitions too.
+
+### Deep links into a large directory
+
+The tree child cache is keyed by parent, page **and page size**. Without the
+page size, "reveal in tree" could reuse a cached 100-item page while asking for
+all children of a large directory (for example `etc` with 236 entries), so the
+target (such as `etc/os-release`) was reported as "not reachable through the
+loaded tree".
+
+### Managed EWF mounts after a restart
+
+A managed `ewfmount` exposure lives inside the server process: when the process
+stops, the FUSE mount disappears. `ensure_image` now re-creates the exposure
+from the source when the recorded path is gone, and rebuilds a stale mount
+directory that lost its `ewf1` (instead of returning
+`exposure_missing`). This also fixes preview/export failing after a restart.
+
+## Evidence picker
+
+The register form has a **Browse…** button next to *Evidence path*. It opens a
+dialog that walks the configured allowed roots, so you no longer have to
+remember an absolute path.
+
+- Only directories and `.E01`, `.raw`, `.img`, `.ad1` files are listed.
+  Continuation segments (`.E02`, `.ad2`, …) are deliberately hidden — register
+  the primary file and the rest is read automatically.
+- Navigation is server-side and restricted to `DFIR_ALLOWED_ROOTS`; `..`
+  traversal, relative paths, files-as-folders and symlinks that resolve outside
+  the roots are rejected. Symlink escapes are skipped and reported as a warning.
+- Hidden dot-entries are skipped, listings are capped (2000 entries) and the
+  truncation is stated explicitly.
+- Selecting a file fills the path field and closes the dialog; the form is still
+  submitted server-side and re-validated by `SecurityPolicy`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/picker?path=` | HTMX fragment for the dialog |
+| GET | `/picker/api?path=` | JSON listing (bound to the same allowlist) |
 
 ## Run the web UI
 
@@ -1124,6 +1451,16 @@ Browser artifact additions:
 File preview addition:
 
 42. `preview_file_content(evidence_id, entry_id, mode="auto", offset=0, limit=65536)`
+43. `recycle_bin_metadata(evidence_id, entry_id)`
+
+ShellBags additions:
+
+44. `shellbags_index_start(evidence_id, rebuild=false)`
+45. `shellbags_index_status(evidence_id)`
+46. `shellbags_list_devices(evidence_id)`
+47. `shellbags_tree(evidence_id, parent_id=null, hive_id=null, page=1, page_size=100)`
+48. `shellbags_search(evidence_id, query=null, kind=null, user_sid=null, device_id=null, hive_id=null, time_from=null, time_to=null, page=1, page_size=100)`
+49. `shellbags_get_node(node_id)`
 
 MCP annotations mark read-only tools, stateful index registration/start, and
 the derived-file extract tool. No `run_command`, shell, or arbitrary-command
@@ -1175,6 +1512,7 @@ cd /home/ubuntu/ftools_v2/dfir-browser
 The suite currently runs 392 tests: tree, static triage, VirusTotal secrets,
 client, cache/rate limiting, registry/Amcache parser, store, web and MCP coverage, EVTX,
 browser artifacts (WebCache ESE, Chromium/Firefox SQLite), file content preview,
+ShellBags,
 discovery/normalization/index/web/MCP coverage, plus real-evidence integration
 tests. The integration tests use the real E01 and
 mounted `ewf1`, register with an explicit source-hash-pinned mapping, run a
@@ -1191,7 +1529,7 @@ Build and smoke-test the wheel:
 ```bash
 .venv/bin/pip wheel . --no-deps -w dist
 .venv/bin/python scripts/wheel_smoke.py \
-  --wheel dist/dfir_browser-0.10.0-py3-none-any.whl
+  --wheel dist/dfir_browser-0.14.0-py3-none-any.whl
 ```
 
 ## Configuration

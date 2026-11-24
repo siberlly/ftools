@@ -14,7 +14,8 @@
 <section class="intake-panel" aria-labelledby="register-heading">
   <div class="intake-copy">
     <h2 id="register-heading">Register evidence</h2>
-    <p>Add an E01, raw or img file from an allowed root. The source is opened read-only.</p>
+    <p>Add an E01, raw, img or ad1 file from an allowed root. Use
+    <strong>Browse…</strong> to pick it; the source is opened read-only.</p>
     <details class="allowed-roots">
       <summary>View allowed roots</summary>
       <ul>
@@ -30,6 +31,10 @@
              placeholder="/evidence/case/image.E01"
              autocomplete="off" spellcheck="false"
              aria-describedby="path-hint">
+      <button type="button" class="tree-btn" data-picker-open
+              aria-haspopup="dialog" aria-controls="evidence-picker">
+        Browse…
+      </button>
       <button type="submit">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">
           <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -37,9 +42,21 @@
         Register
       </button>
     </div>
-    <span class="hint" id="path-hint">Use an absolute path inside one of the allowed roots.</span>
+    <span class="hint" id="path-hint">
+      Browse the allowed roots, or paste an absolute path inside them.
+    </span>
   </form>
 </section>
+
+<dialog id="evidence-picker" class="picker-dialog" aria-label="Select evidence file"
+        data-picker-dialog>
+  <div id="picker-content"
+       hx-get="/picker"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p class="muted small-note">Loading folders…</p>
+  </div>
+</dialog>
 
 {% if evidences %}
 <div class="section-heading">

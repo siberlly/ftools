@@ -1,0 +1,55 @@
+{% if tree.breadcrumb %}
+<nav class="shellbags-breadcrumb small-note" aria-label="Shellbag path">
+  <button type="button" class="link"
+          hx-get="/evidence/{{ evidence_id }}/shellbags/tree"
+          hx-target="#shellbags-tree" hx-swap="innerHTML">Root</button>
+  {% for crumb in tree.breadcrumb %}
+  <span aria-hidden="true">›</span>
+  <button type="button" class="link"
+          hx-get="/evidence/{{ evidence_id }}/shellbags/tree?parent_id={{ crumb.node_id }}"
+          hx-target="#shellbags-tree" hx-swap="innerHTML">{{ crumb.name or "(unnamed)" }}</button>
+  {% endfor %}
+</nav>
+{% endif %}
+
+{% if tree["items"] %}
+<div class="table-wrap">
+<table class="listing compact shellbags-tree-table">
+  <thead>
+    <tr><th>Name</th><th>Type</th><th>Last write (UTC)</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    {% for item in tree["items"] %}
+    <tr>
+      <td class="name">
+        {% if item.name %}
+        <button type="button" class="link"
+                hx-get="/evidence/{{ evidence_id }}/shellbags/tree?parent_id={{ item.node_id }}"
+                hx-target="#shellbags-tree" hx-swap="innerHTML">{{ item.name }}</button>
+        {% else %}
+        <span class="muted">(unnamed {{ item.type_name }})</span>
+        {% endif %}
+        {% if item.is_device %}<span class="badge kind">device</span>{% endif %}
+      </td>
+      <td class="small-note">
+        {{ item.type_name }}
+        {% if item.drive %} · {{ item.drive }}{% endif %}
+        {% if item.volume_label %} · {{ item.volume_label }}{% endif %}
+      </td>
+      <td class="nowrap small-note">{{ item.key_last_write_utc or "" }}</td>
+      <td class="nowrap">
+        <button type="button" class="link"
+                hx-get="/shellbags/nodes/{{ item.node_id }}"
+                hx-target="#shellbags-detail" hx-swap="innerHTML">Inspect</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small-note">
+  {{ tree.total }} item(s) at this level · page {{ tree.page }} of {{ tree.pages or 1 }}
+</p>
+{% else %}
+<p class="muted">No shellbag entries at this level.</p>
+{% endif %}

@@ -69,6 +69,18 @@ EXPECTED_TOOLS = {
     "get_timeline_event",
     "find_related_artifacts",
     "preview_file_content",
+    "recycle_bin_metadata",
+    "browser_credential_stores",
+
+    "preview_sqlite_table",
+
+    "shellbags_get_node",
+    "shellbags_index_start",
+    "shellbags_index_status",
+    "shellbags_list_devices",
+    "shellbags_search",
+    "shellbags_tree",
+
 }
 
 
@@ -79,7 +91,7 @@ def tools_by_name():
 
 def test_tool_set_includes_timeline_and_related_artifacts() -> None:
     assert set(tools_by_name()) == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 47
+    assert len(EXPECTED_TOOLS) == 56
 
 
 def test_tool_annotations() -> None:

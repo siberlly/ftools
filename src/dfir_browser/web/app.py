@@ -7,7 +7,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, Query, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -278,6 +283,34 @@ def create_app(
 
     templates.env.globals["evtx_path_hint"] = evtx_path_hint
 
+    def index_parse_error_lines(
+        evidence_id: str, scan_id: str | None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Skipped fls lines for the index status card (bounded, read-only)."""
+        if not scan_id:
+            return []
+        try:
+            rows = services.index_store.list_parse_errors(
+                evidence_id, scan_id, limit=max(1, min(int(limit), 100))
+            )
+        except Exception:  # noqa: BLE001 - the status card must still render
+            return []
+        out = []
+        for row in rows:
+            data = dict(row) if not isinstance(row, dict) else row
+            raw = str(data.get("raw_line") or "")
+            out.append(
+                {
+                    "line_no": data.get("line_no"),
+                    "error": data.get("error"),
+                    "raw_line": raw[:300],
+                    "truncated": len(raw) > 300,
+                }
+            )
+        return out
+
+    templates.env.globals["index_parse_error_lines"] = index_parse_error_lines
+
     @app.middleware("http")
     async def correlation_middleware(request: Request, call_next):
         with correlation_scope("http") as request_id:
@@ -378,6 +411,33 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         return render(request, "index.html", index_context())
+
+    @app.get("/picker", response_class=HTMLResponse)
+    def evidence_picker(request: Request, path: str | None = None) -> HTMLResponse:
+        try:
+            listing = services.policy.browse_directory(path)
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/picker_listing.html",
+                {"listing": None, "error": str(exc), "path": path or ""},
+            )
+        return render(
+            request,
+            "partials/picker_listing.html",
+            {"listing": listing, "error": None, "path": listing["path"]},
+        )
+
+    @app.get("/picker/api")
+    def evidence_picker_api(path: str | None = None) -> JSONResponse:
+        try:
+            listing = services.policy.browse_directory(path)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        listing["ok"] = True
+        return JSONResponse(listing)
 
     @app.post("/evidence", response_class=HTMLResponse)
     def register_evidence(
@@ -1026,6 +1086,35 @@ def create_app(
             "entry_id": entry.id,
         }
 
+    def _recycle_directory_hints(record, page_result) -> dict[int, dict[str, Any]]:
+        """Deletion times for the $I/$R rows of one directory listing."""
+        try:
+            entries = [
+                services.indexer.tree_entry(record, child.entry_id)
+                for child in (page_result.children or [])
+            ]
+            return services.recycle_bin.directory_hints(record, entries)
+        except Exception:  # noqa: BLE001 - a listing must never fail on this
+            return {}
+
+    def _recycle_metadata(record, entry) -> dict[str, Any] | None:
+        if entry is None or entry.entry_type != "file":
+            return None
+        try:
+            from ..core.recycle import classify as classify_recycle
+
+            if classify_recycle(entry) is None:
+                return None
+            return services.recycle_bin.metadata(record, entry.id).to_dict()
+        except USER_ERRORS as exc:
+            return {
+                "is_recycle_entry": True,
+                "state": "error",
+                "warnings": [str(exc)],
+            }
+        except Exception:  # noqa: BLE001 - the panel must never break Browse
+            return None
+
     def _preview_payload(
         record, entry_id: str, mode: str, offset: int, limit: int | None
     ) -> dict[str, Any]:
@@ -1055,6 +1144,109 @@ def create_app(
             )
         payload["ok"] = True
         return JSONResponse(payload)
+
+    @app.get("/evidence/{evidence_id}/entries/{entry_id}/download")
+    def entry_download(evidence_id: str, entry_id: str) -> Response:
+        try:
+            record = get_record(evidence_id)
+            path, name, size = services.preview.download_copy(record, entry_id)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        safe = (
+            "".join(
+                char
+                for char in name.replace("\\", "_").replace("/", "_")
+                if char.isprintable() and char not in {'"', "\r", "\n"}
+            ).strip()
+            or "evidence.bin"
+        )
+        return FileResponse(
+            path=str(path),
+            media_type="application/octet-stream",
+            filename=safe,
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+                "Content-Length": str(size),
+            },
+        )
+
+    @app.get("/evidence/{evidence_id}/entries/{entry_id}/sqlite")
+    def entry_sqlite_rows(
+        evidence_id: str,
+        entry_id: str,
+        table: str,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> JSONResponse:
+        try:
+            record = get_record(evidence_id)
+            payload = services.preview.sqlite_rows(
+                record, entry_id, table, offset=offset, limit=limit
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        payload["ok"] = True
+        return JSONResponse(payload)
+
+    @app.get(
+        "/evidence/{evidence_id}/entries/{entry_id}/sqlite/panel",
+        response_class=HTMLResponse,
+    )
+    def entry_sqlite_panel(
+        request: Request,
+        evidence_id: str,
+        entry_id: str,
+        table: str,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> HTMLResponse:
+        context: dict[str, Any] = {
+            "evidence_id": evidence_id,
+            "entry_id": entry_id,
+            "table": table,
+            "rows": None,
+            "error": None,
+        }
+        try:
+            get_record(evidence_id)
+            context["rows"] = services.preview.sqlite_rows(
+                record=get_record(evidence_id),
+                entry_id=entry_id,
+                table=table,
+                offset=offset,
+                limit=limit,
+            )
+        except USER_ERRORS as exc:
+            context["error"] = str(exc)
+        return render(request, "partials/preview_sqlite_rows.html", context)
+
+    @app.get("/evidence/{evidence_id}/entries/{entry_id}/image")
+    def entry_preview_image(
+        evidence_id: str, entry_id: str
+    ) -> Response:
+        try:
+            record = get_record(evidence_id)
+            info, data = services.preview.image_bytes(record, entry_id)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        filename = str(info.get("format") or "image")
+        return Response(
+            content=data,
+            media_type=info["media_type"],
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'inline; filename="evidence-image.{filename}"',
+            },
+        )
 
     @app.get(
         "/evidence/{evidence_id}/entries/{entry_id}/preview/panel",
@@ -1176,6 +1368,7 @@ def create_app(
                     directories_only=directories_only,
                     filter_text=filter,
                 )
+                recycle_hints = _recycle_directory_hints(record, page_result)
                 return render(
                     request,
                     "partials/tree_directory.html",
@@ -1183,6 +1376,7 @@ def create_app(
                         "entry": entry.to_tree_node().to_dict(),
                         "page": page_result,
                         "reveal": bool(reveal),
+                        "recycle_hints": recycle_hints,
                     },
                 )
             metadata = None
@@ -1213,6 +1407,7 @@ def create_app(
                 "metadata_error": metadata_error,
                 "latest_triage": latest_triage,
                 "registry_link": _registry_link(record, entry),
+                "recycle_meta": _recycle_metadata(record, entry),
                 "preview_default_limit": services.settings.preview_default_limit,
                 "related": (services.investigation.related(record.evidence_id, entry.id)
                             if getattr(services, "investigation", None) else {"items": [], "sources": {}}),
@@ -1236,6 +1431,324 @@ def create_app(
                 {"error": str(exc)},
                 status_code=400,
             )
+
+    # ------------------------------------------------------------------
+    # ShellBags explorer
+    # ------------------------------------------------------------------
+    def _shellbag_context(request: Request, evidence_id: str) -> dict[str, Any]:
+        record = get_record(evidence_id)
+        state = services.shellbags.state(evidence_id)
+        if (
+            state["state"] == "not_indexed"
+            and getattr(services.settings, "shellbag_auto_index", True)
+        ):
+            try:
+                services.shellbags.start(record)
+            except USER_ERRORS as exc:
+                logger.warning("shellbags auto index failed: %s", exc)
+            state = services.shellbags.state(evidence_id)
+        return {"record": record, "state": state}
+
+    @app.get("/evidence/{evidence_id}/shellbags", response_class=HTMLResponse)
+    def shellbags_tab(request: Request, evidence_id: str) -> HTMLResponse:
+        try:
+            context = _shellbag_context(request, evidence_id)
+            context["devices"] = services.shellbags.devices(evidence_id)
+            context["hives"] = services.shellbags.hives(evidence_id)
+            context["tree"] = services.shellbags.tree(
+                evidence_id, parent_id=None
+            )
+        except USER_ERRORS as exc:
+            return render(request, "partials/error.html", {"error": str(exc)})
+        return render(request, "partials/shellbags.html", context)
+
+    @app.post(
+        "/evidence/{evidence_id}/shellbags/index", response_class=HTMLResponse
+    )
+    def shellbags_index(
+        request: Request,
+        evidence_id: str,
+        rebuild: str = Form("0"),
+        csrf_token: str | None = Form(None),
+    ) -> HTMLResponse:
+        try:
+            csrf.validate(request, csrf_token)
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        try:
+            record = get_record(evidence_id)
+            services.shellbags.start(
+                record, rebuild=str(rebuild).lower() in {"1", "true", "on"}
+            )
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/shellbags_status.html",
+                {"state": services.shellbags.state(evidence_id), "error": str(exc)},
+            )
+        return render(
+            request,
+            "partials/shellbags_status.html",
+            {"state": services.shellbags.state(evidence_id), "error": None},
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/shellbags/status", response_class=HTMLResponse
+    )
+    def shellbags_status(request: Request, evidence_id: str) -> HTMLResponse:
+        try:
+            state = services.shellbags.state(evidence_id)
+        except USER_ERRORS as exc:
+            state = {"state": "failed", "errors": [str(exc)]}
+        return render(
+            request, "partials/shellbags_status.html", {"state": state}
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/shellbags/tree", response_class=HTMLResponse
+    )
+    def shellbags_tree(
+        request: Request,
+        evidence_id: str,
+        parent_id: int | None = None,
+        hive_id: str | None = None,
+        page: int = 1,
+    ) -> HTMLResponse:
+        try:
+            tree = services.shellbags.tree(
+                evidence_id, parent_id=parent_id, hive_id=hive_id, page=page
+            )
+            devices = services.shellbags.devices(evidence_id)
+        except USER_ERRORS as exc:
+            return render(request, "partials/error.html", {"error": str(exc)})
+        return render(
+            request,
+            "partials/shellbags_tree.html",
+            {"tree": tree, "devices": devices, "evidence_id": evidence_id},
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/shellbags/search", response_class=HTMLResponse
+    )
+    def shellbags_search(
+        request: Request,
+        evidence_id: str,
+        q: str | None = None,
+        kind: str | None = None,
+        user_sid: str | None = None,
+        device_id: int | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
+        page: int = 1,
+    ) -> HTMLResponse:
+        form = {
+            "q": q or "",
+            "kind": kind or "",
+            "user_sid": user_sid or "",
+            "device_id": device_id or "",
+            "time_from": time_from or "",
+            "time_to": time_to or "",
+        }
+        result = None
+        error = None
+        try:
+            result = services.shellbags.search(
+                evidence_id,
+                query=q or None,
+                kind=kind or None,
+                user_sid=user_sid or None,
+                device_id=device_id,
+                time_from=time_from or None,
+                time_to=time_to or None,
+                page=page,
+            )
+        except USER_ERRORS as exc:
+            error = str(exc)
+        return render(
+            request,
+            "partials/shellbags_search.html",
+            {
+                "result": result,
+                "error": error,
+                "form": form,
+                "evidence_id": evidence_id,
+            },
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/shellbags/devices", response_class=HTMLResponse
+    )
+    def shellbags_devices(request: Request, evidence_id: str) -> HTMLResponse:
+        try:
+            devices = services.shellbags.devices(evidence_id)
+        except USER_ERRORS as exc:
+            return render(request, "partials/error.html", {"error": str(exc)})
+        return render(
+            request,
+            "partials/shellbags_devices.html",
+            {"devices": devices, "evidence_id": evidence_id},
+        )
+
+    @app.get("/shellbags/nodes/{node_id}", response_class=HTMLResponse)
+    def shellbag_node_detail(request: Request, node_id: int) -> HTMLResponse:
+        try:
+            node = services.shellbags.node(node_id)
+        except USER_ERRORS as exc:
+            return render(
+                request, "partials/shellbags_detail_error.html", {"error": str(exc)}
+            )
+        return render(
+            request, "partials/shellbags_detail.html", {"node": node}
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/shellbags/export", response_class=Response
+    )
+    def shellbags_export(
+        evidence_id: str,
+        format: str = "json",
+        q: str | None = None,
+        kind: str | None = None,
+        user_sid: str | None = None,
+        device_id: int | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
+    ) -> Response:
+        try:
+            get_record(evidence_id)
+            media_type, filename, body = services.shellbags.export(
+                evidence_id,
+                fmt=format,
+                query=q or None,
+                kind=kind or None,
+                user_sid=user_sid or None,
+                device_id=device_id,
+                time_from=time_from or None,
+                time_to=time_to or None,
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        return Response(
+            content=body,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get("/evidence/{evidence_id}/shellbags/api/tree")
+    def shellbags_api_tree(
+        evidence_id: str,
+        parent_id: int | None = None,
+        hive_id: str | None = None,
+        page: int = 1,
+        page_size: int | None = None,
+    ) -> JSONResponse:
+        try:
+            get_record(evidence_id)
+            return JSONResponse(
+                services.shellbags.tree(
+                    evidence_id,
+                    parent_id=parent_id,
+                    hive_id=hive_id,
+                    page=page,
+                    page_size=page_size,
+                )
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+
+    @app.get("/evidence/{evidence_id}/shellbags/api/devices")
+    def shellbags_api_devices(evidence_id: str) -> JSONResponse:
+        try:
+            get_record(evidence_id)
+            return JSONResponse(services.shellbags.devices(evidence_id))
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+
+    @app.get("/evidence/{evidence_id}/shellbags/api/search")
+    def shellbags_api_search(
+        evidence_id: str,
+        q: str | None = None,
+        kind: str | None = None,
+        user_sid: str | None = None,
+        device_id: int | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
+        page: int = 1,
+        page_size: int | None = None,
+    ) -> JSONResponse:
+        try:
+            get_record(evidence_id)
+            return JSONResponse(
+                services.shellbags.search(
+                    evidence_id,
+                    query=q or None,
+                    kind=kind or None,
+                    user_sid=user_sid or None,
+                    device_id=device_id,
+                    time_from=time_from or None,
+                    time_to=time_to or None,
+                    page=page,
+                    page_size=page_size,
+                )
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+
+    @app.get("/shellbags/api/nodes/{node_id}")
+    def shellbags_api_node(node_id: int) -> JSONResponse:
+        try:
+            payload = services.shellbags.node(node_id)
+            payload["ok"] = True
+            return JSONResponse(payload)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=404
+            )
+
+    @app.get(
+        "/evidence/{evidence_id}/recycle/{entry_id}", response_class=HTMLResponse
+    )
+    def recycle_metadata_panel(
+        request: Request, evidence_id: str, entry_id: str
+    ) -> HTMLResponse:
+        try:
+            record = get_record(evidence_id)
+            result = services.recycle_bin.metadata(record, entry_id)
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/recycle_panel.html",
+                {"recycle": None, "error": str(exc)},
+            )
+        return render(
+            request,
+            "partials/recycle_panel.html",
+            {"recycle": result.to_dict(), "error": None},
+        )
+
+    @app.get("/evidence/{evidence_id}/recycle/{entry_id}/json")
+    def recycle_metadata_json(evidence_id: str, entry_id: str) -> JSONResponse:
+        try:
+            record = get_record(evidence_id)
+            result = services.recycle_bin.metadata(record, entry_id)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        data = result.to_dict()
+        data["ok"] = True
+        return JSONResponse(data)
 
     @app.get("/evidence/{evidence_id}/related/{entry_id}")
     def related_artifacts(evidence_id: str, entry_id: int, limit: int = 100):
@@ -2954,6 +3467,147 @@ def create_app(
             "partials/browser_correlation.html",
             {"correlation": result["correlation"], "download": result["download"]},
         )
+
+    @app.get(
+        "/evidence/{evidence_id}/browser/credentials",
+        response_class=HTMLResponse,
+    )
+    def browser_credentials(
+        request: Request,
+        evidence_id: str,
+        artifact_id: str | None = None,
+        browser: str | None = None,
+        profile: str | None = None,
+        protection: str | None = None,
+        q: str | None = None,
+        unmask: bool = False,
+    ) -> HTMLResponse:
+        try:
+            get_record(evidence_id)
+            result = None
+            if artifact_id:
+                result = services.browser_artifacts.credential_stores(
+                    evidence_id, artifact_id
+                )
+            analysis = services.browser_artifacts.analyze_credentials(
+                evidence_id,
+                artifact_id=artifact_id,
+                mask_sensitive=not unmask,
+                browser_filter=browser,
+                profile_filter=profile,
+                query=q,
+                protection_filter=protection,
+            )
+            if result is None:
+                result = {
+                    "trust": "untrusted_evidence_data",
+                    "evidence_id": evidence_id,
+                    "artifact_id": artifact_id or "",
+                    "profile_path": "",
+                    "stores": [s.to_dict() if hasattr(s, "to_dict") else s for s in analysis.stores],
+                    "present_count": len([s for s in analysis.stores if getattr(s, "exists", False)]),
+                    "total_count": len(analysis.stores),
+                    "note": analysis.note,
+                }
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/browser_credentials.html",
+                {"credentials": None, "analysis": None, "error": str(exc)},
+            )
+        return render(
+            request,
+            "partials/browser_credentials.html",
+            {"credentials": result, "analysis": analysis, "error": None},
+        )
+
+    @app.get("/evidence/{evidence_id}/browser/credentials/api")
+    def browser_credentials_api(
+        evidence_id: str,
+        artifact_id: str | None = None,
+        browser: str | None = None,
+        profile: str | None = None,
+        protection: str | None = None,
+        q: str | None = None,
+        unmask: bool = False,
+    ) -> JSONResponse:
+        try:
+            get_record(evidence_id)
+            payload = {}
+            if artifact_id:
+                payload = services.browser_artifacts.credential_stores(
+                    evidence_id, artifact_id
+                )
+            analysis = services.browser_artifacts.analyze_credentials(
+                evidence_id,
+                artifact_id=artifact_id,
+                mask_sensitive=not unmask,
+                browser_filter=browser,
+                profile_filter=profile,
+                query=q,
+                protection_filter=protection,
+            )
+            analysis_dict = analysis.to_dict()
+            payload.update(analysis_dict)
+            payload["ok"] = True
+            if "present_count" not in payload:
+                payload["present_count"] = len([s for s in analysis.stores if getattr(s, "exists", False)])
+            if "total_count" not in payload:
+                payload["total_count"] = len(analysis.stores)
+            return JSONResponse(payload)
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+
+    @app.get("/evidence/{evidence_id}/browser/credentials/export")
+    def browser_credentials_export(
+        evidence_id: str,
+        artifact_id: str | None = None,
+        format: str = "json",
+        browser: str | None = None,
+        profile: str | None = None,
+        protection: str | None = None,
+        q: str | None = None,
+        unmask: bool = False,
+    ) -> Response:
+        try:
+            get_record(evidence_id)
+            from ..core.browser_artifacts.credentials import (
+                export_credentials_csv,
+                export_credentials_json,
+            )
+
+            analysis = services.browser_artifacts.analyze_credentials(
+                evidence_id,
+                artifact_id=artifact_id,
+                mask_sensitive=not unmask,
+                browser_filter=browser,
+                profile_filter=profile,
+                query=q,
+                protection_filter=protection,
+            )
+            if format.lower() == "csv":
+                csv_data = export_credentials_csv(analysis.records, mask_sensitive=not unmask)
+                return Response(
+                    content=csv_data,
+                    media_type="text/csv",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="credentials_{evidence_id}.csv"'
+                    },
+                )
+            json_data = export_credentials_json(analysis.records, mask_sensitive=not unmask)
+            return Response(
+                content=json_data,
+                media_type="application/json",
+                headers={
+                    "Content-Disposition": f'attachment; filename="credentials_{evidence_id}.json"'
+                },
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
 
     @app.get(
         "/evidence/{evidence_id}/browser/summary", response_class=HTMLResponse

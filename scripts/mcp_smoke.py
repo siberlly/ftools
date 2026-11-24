@@ -62,6 +62,23 @@ EXPECTED_TOOLS = {
     "browser_correlate_download",
     "browser_activity_summary",
     "preview_file_content",
+    "find_related_artifacts",
+    "get_timeline_event",
+    "get_timeline_index_status",
+    "query_timeline",
+    "recycle_bin_metadata",
+    "browser_credential_stores",
+
+    "preview_sqlite_table",
+
+    "shellbags_get_node",
+    "shellbags_index_start",
+    "shellbags_index_status",
+    "shellbags_list_devices",
+    "shellbags_search",
+    "shellbags_tree",
+
+    "start_timeline_index",
 }
 
 

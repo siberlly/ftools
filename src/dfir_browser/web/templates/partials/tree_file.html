@@ -13,6 +13,9 @@
         <span class="badge unalloc">unallocated</span>
       {% endif %}
       <span class="badge kind">file</span>
+      {% if entry.fls_type and entry.fls_type.startswith('l') %}
+      <span class="badge unalloc">symbolic link</span>
+      {% endif %}
     </div>
   </header>
 
@@ -55,6 +58,11 @@
   </div>
   {% endif %}
 
+{% if recycle_meta and recycle_meta.is_recycle_entry %}
+{% with recycle = recycle_meta, error = None %}
+{% include "partials/recycle_panel.html" %}
+{% endwith %}
+{% endif %}
   {% if metadata %}
   <details class="raw-block" open>
     <summary>Live istat metadata (MFT entry {{ metadata.inode }})</summary>

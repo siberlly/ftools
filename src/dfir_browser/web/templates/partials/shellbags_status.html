@@ -1,0 +1,22 @@
+<div class="shellbags-status" data-shellbag-state="{{ state.state }}">
+  <span class="badge {% if state.state == 'ready' %}ok{% elif state.state == 'partial' %}unalloc{% elif state.state in ('failed','interrupted') %}deleted{% elif state.state == 'empty' %}kind{% else %}kind{% endif %}">
+    {{ state.state }}
+  </span>
+  {% if state.state in ('running','queued') %}
+  <span class="badge kind">progress {{ state.progress }}%</span>
+  {% endif %}
+  <span class="muted small-note">
+    {{ state.hives }} hive(s) · {{ state.nodes }} node(s) · {{ state.devices }} device(s)
+    {% if state.updated_at %} · updated {{ state.updated_at }}{% endif %}
+  </span>
+  {% if state.errors %}
+  <ul class="small-note">
+    {% for error in state.errors[:5] %}<li class="badge deleted">{{ error }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if state.warnings %}
+  <ul class="small-note muted">
+    {% for warning in state.warnings[:5] %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>

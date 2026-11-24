@@ -168,3 +168,99 @@ def test_export_filename_handles_spaces_and_unicode(policy_env) -> None:
     assert len(name) <= 120
     empty = policy.build_export_filename(2, "")
     assert empty.endswith("file.bin")
+
+
+# ----------------------------------------------------------------------
+# evidence picker browsing
+# ----------------------------------------------------------------------
+def test_browse_lists_roots(policy_env):
+    policy, allowed, _ = policy_env
+    listing = policy.browse_directory(None)
+    assert listing["path"] == ""
+    assert [entry["path"] for entry in listing["entries"]] == [str(allowed.resolve())]
+    assert listing["entries"][0]["kind"] == "directory"
+
+
+def test_browse_lists_directories_and_evidence_files(policy_env):
+    policy, allowed, _ = policy_env
+    (allowed / "case").mkdir()
+    image = allowed / "disk.E01"
+    image.write_bytes(b"x")
+    (allowed / "notes.txt").write_text("hello")
+    (allowed / "segment.E02").write_bytes(b"x")
+    listing = policy.browse_directory(str(allowed))
+    names = [(entry["name"], entry["kind"]) for entry in listing["entries"]]
+    assert ("case", "directory") in names
+    assert ("disk.E01", "file") in names
+    assert "notes.txt" not in [name for name, _ in names]
+    assert "segment.E02" not in [name for name, _ in names]
+    # An allowed root has no parent inside the allowlist.
+    assert listing["parent"] is None
+
+
+def test_browse_reports_parent_inside_root(policy_env):
+    policy, allowed, _ = policy_env
+    child = allowed / "case"
+    child.mkdir()
+    listing = policy.browse_directory(str(child))
+    assert listing["parent"] == str(allowed.resolve())
+
+
+def test_browse_rejects_outside_root(policy_env):
+    policy, allowed, outside = policy_env
+    with pytest.raises(PolicyError):
+        policy.browse_directory(str(outside))
+
+
+def test_browse_rejects_traversal(policy_env):
+    policy, allowed, outside = policy_env
+    with pytest.raises(PolicyError):
+        policy.browse_directory(str(allowed / ".." / "outside"))
+
+
+def test_browse_rejects_file_path(policy_env):
+    policy, allowed, _ = policy_env
+    image = allowed / "disk.E01"
+    image.write_bytes(b"x")
+    with pytest.raises(PolicyError):
+        policy.browse_directory(str(image))
+
+
+def test_browse_rejects_relative_path(policy_env):
+    policy, allowed, _ = policy_env
+    with pytest.raises(PolicyError):
+        policy.browse_directory("relative/dir")
+
+
+def test_browse_skips_symlink_escape(policy_env):
+    policy, allowed, outside = policy_env
+    secret = outside / "secret.E01"
+    secret.write_bytes(b"x")
+    (allowed / "link").symlink_to(outside)
+    listing = policy.browse_directory(str(allowed))
+    assert "link" not in [entry["name"] for entry in listing["entries"]]
+
+
+def test_browse_skips_hidden_entries(policy_env):
+    policy, allowed, _ = policy_env
+    (allowed / ".hidden").mkdir()
+    (allowed / ".hidden.E01").write_bytes(b"x")
+    listing = policy.browse_directory(str(allowed))
+    assert not [entry for entry in listing["entries"] if entry["name"].startswith(".")]
+
+
+def test_browse_respects_limit(policy_env):
+    policy, allowed, _ = policy_env
+    for index in range(5):
+        (allowed / f"case{index}").mkdir()
+    listing = policy.browse_directory(str(allowed), limit=2)
+    assert len(listing["entries"]) == 2
+    assert listing["truncated"] is True
+
+
+def test_browse_sorts_directories_first(policy_env):
+    policy, allowed, _ = policy_env
+    (allowed / "zeta").mkdir()
+    (allowed / "alpha.E01").write_bytes(b"x")
+    listing = policy.browse_directory(str(allowed))
+    assert listing["entries"][0]["kind"] == "directory"

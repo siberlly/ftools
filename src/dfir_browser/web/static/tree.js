@@ -434,7 +434,9 @@
     options = options || {};
     var page = options.page || 1;
     var pageSize = options.pageSize || 100;
-    var key = id + ":" + page;
+    // The cache key must include the page size: a 100-item page and a
+    // 500-item page for the same parent are different payloads.
+    var key = id + ":" + page + ":" + pageSize;
     if (this.cache.has(key) && !options.force) {
       this.renderChildren(id, this.cache.get(key), options);
       return Promise.resolve(this.cache.get(key));
@@ -852,7 +854,14 @@
         var id = parseInteger(button.getAttribute("data-tree-open-id"));
         if (id === null) return;
         var node = self.nodeById(id);
-        var isDir = node && node.getAttribute("data-entry-type") === "directory";
+        if (!node) {
+          // The target is not in the left tree yet (a child that was never
+          // expanded). Reveal it first so the panel opens instead of silently
+          // doing nothing.
+          self.revealEntry(id);
+          return;
+        }
+        var isDir = node.getAttribute("data-entry-type") === "directory";
         var action = isDir ? self.openNode(id) : Promise.resolve();
         action.then(function () {
           self.selectNode(id, { scroll: true, panel: true });

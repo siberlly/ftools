@@ -899,6 +899,7 @@ class BrowserArtifactService:
             if preset_obj.filters.get("states"):
                 state = None
         result = self.store.query_downloads(
+            evidence_id=evidence_id,
             profile_ids=self._profiles_for(evidence_id, profile_ids),
             query=text,
             domain=domain,
@@ -1001,6 +1002,7 @@ class BrowserArtifactService:
                 "sort_dir must be asc or desc", code="browser_invalid_sort"
             )
         return self.store.query_visits(
+            evidence_id=evidence_id,
             profile_ids=self._profiles_for(evidence_id, profile_ids),
             query=text,
             domain=domain,
@@ -1035,6 +1037,7 @@ class BrowserArtifactService:
                 "sort_dir must be asc or desc", code="browser_invalid_sort"
             )
         return self.store.query_cache(
+            evidence_id=evidence_id,
             profile_ids=self._profiles_for(evidence_id, profile_ids),
             query=text,
             domain=domain,
@@ -1077,6 +1080,334 @@ class BrowserArtifactService:
             total=total,
             page=page,
             page_size=size,
+        )
+
+    # ------------------------------------------------------------------
+    # credential stores (metadata only)
+    # ------------------------------------------------------------------
+    def credential_stores(
+        self, evidence_id: str, artifact_id: str
+    ) -> dict[str, Any]:
+        """Report credential-store files next to one browser artifact.
+
+        Only presence, size, record counts and host/field names are returned.
+        Passwords, cookie values, keys and tokens are never read.
+        """
+        from .credentials import (
+            CREDENTIAL_FILES,
+            analyze_store,
+            empty_report,
+        )
+
+        artifact = self.store.get_artifact(artifact_id)
+        if artifact.evidence_id != evidence_id:
+            raise BrowserArtifactRejected(
+                "browser artifact does not belong to this evidence",
+                code="browser_evidence_mismatch",
+            )
+        scan_id = self._scan_id(self.evidence.get(evidence_id))
+        parent = artifact.evidence_path.rsplit("/", 1)[0]
+        record = self.evidence.get(evidence_id)
+        partition_offset = getattr(record, "offset_sectors", None)
+        if partition_offset is None and getattr(record, "layout", None):
+            partition_offset = getattr(record.layout, "offset_sectors", None)
+        if partition_offset is None and hasattr(record, "exposure_details"):
+            partition_offset = record.exposure_details.get("partition_start_sectors")
+
+        reports: list[dict[str, Any]] = []
+        for name in CREDENTIAL_FILES:
+            relative = f"{parent}/{name}"
+            entries = self.index_store.find_entries_by_exact_path(
+                evidence_id, scan_id, relative
+            )
+            if not entries:
+                rep = empty_report(name, relative)
+                rep.partition_offset = partition_offset
+                rep.evidence_id = evidence_id
+                reports.append(rep.to_dict())
+                continue
+            entry = entries[0]
+            try:
+                extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+                report = empty_report(name, entry.full_path)
+                report.exists = True
+                report.warnings = []
+                report.size = int(entry.size) if entry.size is not None else None
+                report.source_path = entry.full_path
+                report.inode = entry.inode
+                report.partition_offset = partition_offset
+                report.offset_unit = "sectors"
+                report.sha256 = getattr(extraction, "sha256", None)
+                report.evidence_id = evidence_id
+                report.extracted_at = getattr(extraction, "extracted_at", None)
+                report.provenance = extraction.to_dict() if hasattr(extraction, "to_dict") else {}
+                analyzed = analyze_store(Path(extraction.output_path), report)
+            except Exception as exc:  # noqa: BLE001 - panel must not fail
+                report = empty_report(name, entry.full_path)
+                report.exists = True
+                report.source_path = entry.full_path
+                report.inode = entry.inode
+                report.partition_offset = partition_offset
+                report.warnings.append(f"could not inspect: {exc}")
+                analyzed = report
+            reports.append(analyzed.to_dict())
+        present = [item for item in reports if item["exists"]]
+        return {
+            "trust": "untrusted_evidence_data",
+            "evidence_id": evidence_id,
+            "artifact_id": artifact_id,
+            "profile_path": parent,
+            "stores": reports,
+            "present_count": len(present),
+            "total_count": len(reports),
+            "note": (
+                "Metadata only. Saved passwords, cookie values, keys and tokens "
+                "are never decrypted or displayed."
+            ),
+        }
+
+    def analyze_credentials(
+        self,
+        evidence_id: str,
+        *,
+        artifact_id: str | None = None,
+        mask_sensitive: bool = True,
+        browser_filter: str | None = None,
+        profile_filter: str | None = None,
+        query: str | None = None,
+        protection_filter: str | None = None,
+    ) -> CredentialAnalysisResult:
+        """Analyze saved browser credentials across profiles in this evidence.
+
+        Forensic rules strictly enforced:
+        - Passwords, encryption keys and raw secrets are never decrypted, executed or displayed.
+        - Usernames are masked by default (mask_sensitive=True).
+        - Protection status is verified against supporting evidence (or marked UNKNOWN).
+        - Complete provenance (source path, inode, partition offset, SHA-256) is recorded.
+        """
+        from .credentials import (
+            CREDENTIAL_FILES,
+            SQLITE_STORES,
+            analyze_store,
+            empty_report,
+            inspect_local_state,
+            parse_chromium_logins,
+            parse_firefox_logins,
+            METADATA_ONLY_NOTE,
+        )
+        from .detector import identify_browser_details, user_from_path
+        from .models import CredentialAnalysisResult, CredentialRecord
+
+        record = self.evidence.get(evidence_id)
+        scan_id = self._scan_id(record)
+        partition_offset = getattr(record, "offset_sectors", None)
+        if partition_offset is None and getattr(record, "layout", None):
+            partition_offset = getattr(record.layout, "offset_sectors", None)
+        if partition_offset is None and hasattr(record, "exposure_details"):
+            partition_offset = record.exposure_details.get("partition_start_sectors")
+
+        profile_paths: list[str] = []
+        if artifact_id:
+            artifact = self.store.get_artifact(artifact_id)
+            if artifact.evidence_id != evidence_id:
+                raise BrowserArtifactRejected(
+                    "browser artifact does not belong to this evidence",
+                    code="browser_evidence_mismatch",
+                )
+            parent = artifact.evidence_path.rsplit("/", 1)[0]
+            profile_paths.append(parent)
+        else:
+            seen_parents: set[str] = set()
+            for art in self.store.list_artifacts(evidence_id):
+                parent = art.evidence_path.rsplit("/", 1)[0]
+                if parent not in seen_parents:
+                    seen_parents.add(parent)
+                    profile_paths.append(parent)
+
+            candidates = self.index_store.find_browser_artifact_candidates(
+                evidence_id, scan_id, include_deleted=False
+            )
+            for c in candidates:
+                parent = c.full_path.rsplit("/", 1)[0]
+                if parent not in seen_parents:
+                    seen_parents.add(parent)
+                    profile_paths.append(parent)
+
+            if hasattr(self.index_store, "find_credential_artifact_candidates"):
+                cred_candidates = self.index_store.find_credential_artifact_candidates(
+                    evidence_id, scan_id, include_deleted=False
+                )
+                for c in cred_candidates:
+                    parent = c.full_path.rsplit("/", 1)[0]
+                    if parent not in seen_parents:
+                        seen_parents.add(parent)
+                        profile_paths.append(parent)
+
+        all_records: list[CredentialRecord] = []
+        stores_reports: list[Any] = []
+        warnings: list[str] = []
+        browsers_found: set[str] = set()
+        profiles_found: set[str] = set()
+
+        for prof_path in profile_paths:
+            brand, engine, detected_profile, brand_label = identify_browser_details(prof_path)
+            profile_name = detected_profile or prof_path.rsplit("/", 1)[-1]
+            os_user = user_from_path(prof_path)
+
+            if brand != "unknown":
+                browsers_found.add(brand_label)
+            if profile_name:
+                profiles_found.add(profile_name)
+
+            local_state_info = None
+            if engine == "chromium":
+                user_data_path = prof_path.rsplit("/", 1)[0] if "/User Data/" in prof_path else prof_path
+                ls_candidates = [f"{user_data_path}/Local State", f"{prof_path}/Local State"]
+                for ls_path in ls_candidates:
+                    ls_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, ls_path)
+                    if ls_entries:
+                        try:
+                            ls_ext = self.filesystem.extract_entry(record, ls_entries[0], CASE_ID)
+                            local_state_info = inspect_local_state(Path(ls_ext.output_path))
+                            break
+                        except Exception as exc:
+                            warnings.append(f"could not inspect Local State at {ls_path}: {exc}")
+
+            has_key4 = False
+            has_key3 = False
+            if engine == "gecko" or brand == "firefox":
+                k4_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, f"{prof_path}/key4.db")
+                has_key4 = bool(k4_entries)
+                k3_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, f"{prof_path}/key3.db")
+                has_key3 = bool(k3_entries)
+
+            for name in CREDENTIAL_FILES:
+                relpath = f"{prof_path}/{name}"
+                entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, relpath)
+                if not entries:
+                    continue
+                entry = entries[0]
+                report = empty_report(name, entry.full_path)
+                report.exists = True
+                report.size = int(entry.size) if entry.size is not None else None
+                report.source_path = entry.full_path
+                report.inode = entry.inode
+                report.partition_offset = partition_offset
+                report.offset_unit = "sectors"
+                report.evidence_id = evidence_id
+
+                extracted_path = None
+                try:
+                    if name in SQLITE_STORES:
+                        for s_suffix in ("-wal", "-shm"):
+                            sidecar_rel = f"{prof_path}/{name}{s_suffix}"
+                            sc_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, sidecar_rel)
+                            if sc_entries:
+                                try:
+                                    self.filesystem.extract_entry(record, sc_entries[0], CASE_ID)
+                                except Exception:
+                                    pass
+
+                    extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+                    report.exists = True
+                    report.warnings = []
+                    report.sha256 = getattr(extraction, "sha256", None)
+                    report.extracted_at = getattr(extraction, "extracted_at", None)
+                    report.provenance = extraction.to_dict() if hasattr(extraction, "to_dict") else {}
+                    extracted_path = Path(extraction.output_path)
+                    analyzed = analyze_store(extracted_path, report)
+                except Exception as exc:
+                    report.warnings.append(f"could not extract or inspect store: {exc}")
+                    analyzed = report
+
+                stores_reports.append(analyzed)
+
+                if extracted_path and extracted_path.is_file():
+                    context = {
+                        "brand": brand,
+                        "brand_label": brand_label,
+                        "engine": engine,
+                        "profile": profile_name,
+                        "user": os_user,
+                        "source_path": entry.full_path,
+                        "entry_id": entry.id,
+                        "inode": entry.inode,
+                        "partition_offset": partition_offset,
+                        "offset_unit": "sectors",
+                        "sha256": report.sha256,
+                        "evidence_id": evidence_id,
+                        "extracted_at": report.extracted_at,
+                        "provenance": report.provenance,
+                    }
+                    if name in {"Login Data", "Login Data For Account"}:
+                        cr_records = parse_chromium_logins(
+                            extracted_path,
+                            context,
+                            mask_sensitive=mask_sensitive,
+                            local_state_info=local_state_info,
+                        )
+                        all_records.extend(cr_records)
+                    elif name in {"logins.json", "logins-backup.json"}:
+                        ff_records = parse_firefox_logins(
+                            extracted_path,
+                            context,
+                            mask_sensitive=mask_sensitive,
+                            has_key4=has_key4,
+                            has_key3=has_key3,
+                        )
+                        all_records.extend(ff_records)
+
+        filtered: list[CredentialRecord] = []
+        for r in all_records:
+            if browser_filter:
+                bf = browser_filter.strip().lower()
+                if bf not in r.brand.lower() and bf not in r.browser.lower() and bf not in r.engine.lower():
+                    continue
+            if profile_filter:
+                pf = profile_filter.strip().lower()
+                if pf not in r.profile.lower():
+                    continue
+            if protection_filter:
+                pt = protection_filter.strip().upper()
+                if pt != r.protection_status.upper():
+                    continue
+            if query:
+                q = query.strip().lower()
+                matched = (
+                    q in r.website.lower()
+                    or (r.action_url and q in r.action_url.lower())
+                    or (r.username_masked and q in r.username_masked.lower())
+                    or (r.username_raw and q in r.username_raw.lower())
+                    or q in r.profile.lower()
+                )
+                if not matched:
+                    continue
+            filtered.append(r)
+
+        prot_counts: dict[str, int] = {}
+        for r in filtered:
+            prot_counts[r.protection_status] = prot_counts.get(r.protection_status, 0) + 1
+
+        overall_prov = {
+            "evidence_id": evidence_id,
+            "partition_offset": partition_offset,
+            "offset_unit": "sectors",
+            "profiles_inspected": len(profile_paths),
+            "stores_found": len([s for s in stores_reports if getattr(s, "exists", False)]),
+            "timestamp": _now(),
+        }
+
+        return CredentialAnalysisResult(
+            evidence_id=evidence_id,
+            records=filtered,
+            stores=stores_reports,
+            total_records=len(filtered),
+            browsers_found=sorted(browsers_found),
+            profiles_found=sorted(profiles_found),
+            protection_summary=prot_counts,
+            warnings=warnings,
+            note=METADATA_ONLY_NOTE,
+            provenance=overall_prov,
         )
 
     # ------------------------------------------------------------------
@@ -1171,7 +1502,7 @@ class BrowserArtifactService:
         top_n = max(1, min(int(top_n or 20), 100))
         profiles = self._profiles_for(evidence_id, profile_ids)
         with self.store._connect() as connection:
-            where, params = _scope(profiles, start, end)
+            where, params = _scope(evidence_id, profiles, start, end)
             total_visits = int(
                 connection.execute(
                     "SELECT COUNT(*) AS n FROM browser_visits" + where, params
@@ -1241,6 +1572,7 @@ class BrowserArtifactService:
                 (evidence_id,),
             ).fetchall()
         notable_rows = self.store.query_downloads(
+            evidence_id=evidence_id,
             profile_ids=profiles,
             query=None,
             domain=None,
@@ -1303,11 +1635,20 @@ class BrowserArtifactService:
         return list_presets()
 
 
-def _scope(profile_ids: list[str] | None, start: str | None, end: str | None):
+def _scope(
+    evidence_id: str,
+    profile_ids: list[str] | None,
+    start: str | None,
+    end: str | None,
+):
     if profile_ids == []:
         return " WHERE 1 = 0", []
-    clauses = []
-    params: list[Any] = []
+    # Always scope the summary to one evidence; the index stores several.
+    clauses = [
+        "artifact_id IN (SELECT artifact_id FROM browser_artifacts "
+        "WHERE evidence_id = ?)"
+    ]
+    params: list[Any] = [evidence_id]
     if profile_ids:
         clauses.append(
             "profile_id IN (" + ", ".join("?" for _ in profile_ids) + ")"

@@ -47,7 +47,10 @@ HOSTS_TEXT = (
 )
 
 
-def _row(full_path, name, inode, size, deleted=False, entry_type="file"):
+def _row(
+    full_path, name, inode, size, deleted=False, entry_type="file",
+    fls_type=None,
+):
     parent = full_path.rsplit("/", 1)[0] if "/" in full_path else ""
     extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     return (
@@ -60,7 +63,7 @@ def _row(full_path, name, inode, size, deleted=False, entry_type="file"):
         inode,
         1,
         128,
-        "-/r" if deleted else "-/-",
+        fls_type or ("-/r" if deleted else "-/-"),
         entry_type,
         0 if deleted else 1,
         1 if deleted else 0,
@@ -126,7 +129,9 @@ def make_record() -> EvidenceRecord:
     )
 
 
-def build_preview_services(tmp_path: Path, payloads: dict[int, bytes], **overrides):
+def build_preview_services(
+    tmp_path: Path, payloads: dict[int, bytes], *, rows=None, **overrides
+):
     index_path = tmp_path / "index" / "filesystem.db"
     store = IndexStore(index_path)
     store.ensure_schema()
@@ -144,20 +149,22 @@ def build_preview_services(tmp_path: Path, payloads: dict[int, bytes], **overrid
         },
         "2020-01-01T00:00:00Z",
     )
-    rows = rows_for(payloads)
-    store.insert_entries(rows)
+    inserted = rows if rows is not None else rows_for(payloads)
+    store.insert_entries(inserted)
     store.link_tree(EVIDENCE, SCAN)
     store.finish_scan(
         EVIDENCE,
         SCAN,
         status="ready",
-        entries_seen=len(rows),
-        entries_indexed=len(rows),
+        entries_seen=len(inserted),
+        entries_indexed=len(inserted),
         parse_errors=0,
-        deleted_files=0,
+        deleted_files=sum(1 for row in inserted if row[12]),
         deleted_directories=0,
-        allocated_files=sum(1 for row in rows if row[10] == "file"),
-        allocated_directories=sum(1 for row in rows if row[10] == "directory"),
+        allocated_files=sum(1 for row in inserted if row[10] == "file" and not row[12]),
+        allocated_directories=sum(
+            1 for row in inserted if row[10] == "directory" and not row[12]
+        ),
         error_code=None,
         error_message=None,
     )

@@ -104,6 +104,25 @@ def from_unix_seconds(value) -> Timestamp:
     return Timestamp(_format(moment), raw, "unix_seconds")
 
 
+def from_unix_milliseconds(value) -> Timestamp:
+    raw = None if value is None else str(value)
+    if value in (None, 0, "0", ""):
+        return Timestamp(None, raw, "unix_millis_zero")
+    try:
+        millis = int(value)
+    except (TypeError, ValueError):
+        return Timestamp(None, raw, "unix_millis_invalid", "not an integer")
+    if millis <= 0:
+        return Timestamp(None, raw, "unix_millis_invalid", "non-positive")
+    try:
+        moment = UNIX_EPOCH + timedelta(milliseconds=millis)
+    except (OverflowError, ValueError):
+        return Timestamp(None, raw, "unix_millis_overflow", "out of range")
+    if not _valid(moment):
+        return Timestamp(None, raw, "unix_millis_out_of_range", "implausible year")
+    return Timestamp(_format(moment), raw, "unix_milliseconds")
+
+
 def from_unix_microseconds(value) -> Timestamp:
     raw = None if value is None else str(value)
     if value in (None, 0, "0", ""):

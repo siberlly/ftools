@@ -404,3 +404,172 @@ def test_symlinked_copy_rejected(env, tmp_path):
     link.symlink_to(outside)
     result = services.preview.preview(record, hosts)
     assert "www.malware430.com" in result.content
+
+
+# ----------------------------------------------------------------------
+# symbolic links
+# ----------------------------------------------------------------------
+LINK_PATH = "Users/IEUser/Documents/link.txt"
+ESCAPE_LINK_PATH = "Users/IEUser/Documents/escape.txt"
+LINK_INODE = 51001
+ESCAPE_INODE = 51002
+
+
+def _symlink_env(tmp_path, target: str):
+    from preview_helpers import _row
+
+    rows = [
+        _row(TEXT_PATH, "notes.txt", 50010, 24),
+        _row(LINK_PATH, "link.txt", LINK_INODE, 16, fls_type="l/l"),
+        _row(ESCAPE_LINK_PATH, "escape.txt", ESCAPE_INODE, 20, fls_type="l/l"),
+    ]
+    services, record = build_preview_services(
+        tmp_path, {50010: b"plain ascii\nsecond line\n"}, rows=rows
+    )
+    stub_preview_extract(services, {50010: b"plain ascii\nsecond line\n"})
+    from types import SimpleNamespace
+
+    def stat(image, evidence_id, inode, offset_sectors=0):
+        text = target if inode == LINK_INODE else "../../../../etc/passwd"
+        return SimpleNamespace(summary={"symlink_target": text, "is_symlink": True})
+
+    services.filesystem.stat = stat
+    return services, record
+
+
+def test_preview_follows_symlink_inside_evidence(tmp_path):
+    services, record = _symlink_env(tmp_path, "notes.txt")
+    try:
+        link = entry_id(services, LINK_PATH)
+        result = services.preview.preview(record, link)
+        assert result.preview_mode == "text"
+        assert "second line" in result.content
+        assert any("symbolic link" in w for w in result.warnings)
+        assert result.entry_id == entry_id(services, TEXT_PATH)
+    finally:
+        services.cleanup()
+
+
+def test_preview_symlink_escape_is_not_followed(tmp_path):
+    services, record = _symlink_env(tmp_path, "notes.txt")
+    try:
+        link = entry_id(services, ESCAPE_LINK_PATH)
+        result = services.preview.preview(record, link)
+        assert result.preview_mode == "symlink"
+        assert result.content == ""
+        assert any("escapes the evidence root" in w for w in result.warnings)
+    finally:
+        services.cleanup()
+
+
+def test_preview_symlink_with_missing_target(tmp_path):
+    services, record = _symlink_env(tmp_path, "missing.txt")
+    try:
+        result = services.preview.preview(record, entry_id(services, LINK_PATH))
+        assert result.preview_mode == "symlink"
+        assert any("not in the filesystem index" in w for w in result.warnings)
+    finally:
+        services.cleanup()
+
+
+def test_extract_follows_symlink_target(tmp_path):
+    """Extraction and triage must use the target, not the empty link inode."""
+    from types import SimpleNamespace
+
+    services, record = _symlink_env(tmp_path, "notes.txt")
+    calls = []
+
+    def fake_extract(image, evidence_id, inode, case_id, offset_sectors=0, assume_file=False):
+        calls.append(inode)
+        return SimpleNamespace(
+            output_path=str(tmp_path / "copy.bin"),
+            sha256="0" * 64,
+            size=24,
+        )
+
+    services.filesystem.extract = fake_extract
+    try:
+        link = services.indexer.tree_entry(record, entry_id(services, LINK_PATH))
+        services.filesystem.extract_entry(record, link, "case01")
+        assert calls == [50010]
+    finally:
+        services.cleanup()
+
+
+def test_extract_keeps_link_when_target_escapes(tmp_path):
+    from types import SimpleNamespace
+
+    services, record = _symlink_env(tmp_path, "notes.txt")
+    calls = []
+
+    def fake_extract(image, evidence_id, inode, case_id, offset_sectors=0, assume_file=False):
+        calls.append(inode)
+        return SimpleNamespace(output_path=str(tmp_path / "copy.bin"), sha256="0" * 64, size=0)
+
+    services.filesystem.extract = fake_extract
+    try:
+        link = services.indexer.tree_entry(
+            record, entry_id(services, ESCAPE_LINK_PATH)
+        )
+        services.filesystem.extract_entry(record, link, "case01")
+        assert calls == [ESCAPE_INODE]
+    finally:
+        services.cleanup()
+
+
+def test_line_cap_allows_continuing_from_next_offset(tmp_path):
+    lines = [f"line {index:05d}" for index in range(500)]
+    payload = ("\n".join(lines) + "\n").encode("utf-8")
+    services, record = build_preview_services(
+        tmp_path,
+        {50010: payload},
+        preview_text_max_lines=10,
+    )
+    stub_preview_extract(services, {50010: payload})
+    try:
+        entry = entry_id(services, TEXT_PATH)
+        first = services.preview.preview(record, entry)
+        assert first.lines_returned == 10
+        assert first.truncated is True
+        assert first.next_offset is not None
+        assert first.has_more is True
+        after = first.next_offset
+        second = services.preview.preview(record, entry, offset=after)
+        assert second.lines_returned == 10
+        assert "line 00010" in second.content
+        assert second.content != first.content
+    finally:
+        services.cleanup()
+
+
+def test_download_copy_returns_full_file(tmp_path):
+    payload = b"x" * 5000
+    services, record = build_preview_services(tmp_path, {50010: payload})
+    stub_preview_extract(services, {50010: payload})
+    try:
+        path, name, size = services.preview.download_copy(
+            record, entry_id(services, TEXT_PATH)
+        )
+        assert size == 5000
+        assert path.read_bytes() == payload
+        assert name == "notes.txt"
+    finally:
+        services.cleanup()
+
+
+def test_download_rejects_oversized(tmp_path):
+    payload = b"y" * 2048
+    services, record = build_preview_services(
+        tmp_path,
+        {50010: payload},
+        preview_max_download_bytes=1024,
+    )
+    stub_preview_extract(services, {50010: payload})
+    try:
+        with pytest.raises(PreviewRejected) as exc:
+            services.preview.download_copy(
+                record, entry_id(services, TEXT_PATH)
+            )
+        assert exc.value.code == "preview_download_too_large"
+    finally:
+        services.cleanup()

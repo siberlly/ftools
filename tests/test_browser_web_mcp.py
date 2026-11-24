@@ -135,7 +135,8 @@ def test_history_and_cache_views(env):
 
 def test_xss_payload_escaped(env):
     client, services, record = env
-    _index_chromium(services, record)
+    status = _index_chromium(services, record)
+    profile = services.browser_artifacts.list_profiles(EVIDENCE).items[0]
     services.browser_artifacts.store.insert_records(
         visits=[
             __import__(
@@ -143,8 +144,8 @@ def test_xss_payload_escaped(env):
                 fromlist=["VisitRecord"],
             ).VisitRecord(
                 visit_id=0,
-                profile_id="bp_test",
-                source_artifact_id="ba_test",
+                profile_id=profile.profile_id,
+                source_artifact_id=status["artifact_id"],
                 source_record_id="visit:99",
                 user=None,
                 browser="chromium",
@@ -340,3 +341,68 @@ def test_search_all_view_and_mcp(env):
     assert result["total"] >= 2
     assert result["sections"]["downloads"]["total"] >= 1
     assert result["trust"] == "untrusted_evidence_data"
+
+
+def test_queries_are_scoped_to_one_evidence(env):
+    """A second evidence's artifacts must never leak into these results."""
+    client, services, record = env
+    status = _index_chromium(services, record)
+    artifact_id = status["artifact_id"]
+    profile = services.browser_artifacts.list_profiles(EVIDENCE).items[0]
+
+    # Same index database, different evidence id, distinct artifact.
+    services.browser_artifacts.store.upsert_artifact(
+        __import__(
+            "dfir_browser.core.browser_artifacts.models", fromlist=["SourceArtifact"]
+        ).SourceArtifact(
+            artifact_id="ba_other_evidence",
+            evidence_id="ev_00000000000b",
+            entry_id=999,
+            inode=999,
+            evidence_path="Users/other/History",
+            filename="History",
+            browser="chromium",
+            artifact_type="chromium_history",
+            user="other",
+            profile_name=None,
+            size=1024,
+            sha256=None,
+            status="ready",
+            phase="ready",
+            backend="chromium-sqlite",
+            parser_version="test",
+        )
+    )
+    from dfir_browser.core.browser_artifacts.models import VisitRecord
+
+    services.browser_artifacts.store.insert_records(
+        visits=[
+            VisitRecord(
+                visit_id=0,
+                profile_id="bp_other",
+                source_artifact_id="ba_other_evidence",
+                source_record_id="visit:1",
+                user="other",
+                browser="chromium",
+                url="https://other-evidence.test/secret",
+                scheme="https",
+                host="other-evidence.test",
+                registrable_domain="other-evidence.test",
+                title="other",
+                visit_time_utc="2022-11-15T21:18:40.000000Z",
+                raw_timestamp="1",
+                visit_type="transition:0",
+            )
+        ]
+    )
+
+    mine = services.browser_artifacts.query_history(EVIDENCE, page_size=500)
+    assert all(
+        "other-evidence.test" not in (item["url"] or "") for item in mine.items
+    )
+    other = services.browser_artifacts.query_history(
+        "ev_00000000000b", page_size=500
+    )
+    assert other.total == 1
+    summary = services.browser_artifacts.summary(EVIDENCE).to_dict()
+    assert summary["total_visits"] == mine.total

@@ -356,7 +356,54 @@ def parse_mmls(text: str) -> dict[str, Any]:
     return result
 
 
+def _parse_istat_unix(text: str) -> dict[str, Any] | None:
+    """Ext4/Unix istat layout: ``inode:``, ``mode:``, ``size:``."""
+    match = re.search(r"^inode:\s*(\d+)", text, re.MULTILINE)
+    if match is None:
+        return None
+
+    def first(pattern: str) -> str | None:
+        found = re.search(pattern, text, re.MULTILINE)
+        return found.group(1).strip() if found else None
+
+    mode = first(r"^mode:\s*(\S+)")
+    is_directory = None
+    if mode:
+        is_directory = mode.startswith("d")
+    allocated = None
+    if re.search(r"^Allocated$", text, re.MULTILINE):
+        allocated = True
+    elif re.search(r"^Not Allocated$", text, re.MULTILINE):
+        allocated = False
+    size_raw = first(r"^size:\s*(\d+)")
+    link_target = first(r"^symbolic link to:\s*(.+)$")
+    return {
+        "inode": int(match.group(1)),
+        "sequence": None,
+        "allocated": allocated,
+        "is_directory": is_directory,
+        "name": None,
+        "parent_inode": None,
+        "security_id": None,
+        "flags": first(r"^Flags:\s*(.+)$"),
+        "mode": mode,
+        "is_symlink": bool(mode and mode.startswith("l")),
+        "symlink_target": link_target,
+        "timestamps": {
+            "created": normalize_timestamp(first(r"^File Created:\s*(.+)$")),
+            "modified": normalize_timestamp(first(r"^File Modified:\s*(.+)$")),
+            "mft_modified": normalize_timestamp(first(r"^Inode Modified:\s*(.+)$")),
+            "accessed": normalize_timestamp(first(r"^Accessed:\s*(.+)$")),
+        },
+        "data_size": int(size_raw) if size_raw else None,
+        "attributes": [],
+    }
+
+
 def parse_istat(text: str) -> dict[str, Any]:
+    unix = _parse_istat_unix(text)
+    if unix is not None:
+        return unix
     head = re.split(r"^Attributes:\s*$", text, maxsplit=1, flags=re.MULTILINE)[0]
 
     entry_match = re.search(r"^Entry:\s*(\d+)\s+Sequence:\s*(\d+)", text, re.MULTILINE)

@@ -1,0 +1,26 @@
+{% if devices["items"] %}
+<ul class="shellbags-device-list">
+  {% for device in devices["items"] %}
+  <li>
+    <button type="button" class="link" data-shellbag-device="{{ device.node_id }}"
+            {% if device.node_id %}hx-get="/evidence/{{ evidence_id }}/shellbags/tree?parent_id={{ device.node_id }}"
+            hx-target="#shellbags-tree" hx-swap="innerHTML"{% endif %}>
+      {{ device.name or "Unnamed device" }}
+    </button>
+    <div class="small-note muted">
+      <span class="badge {% if device.kind == 'mtp' %}kind{% else %}ok{% endif %}">{{ device.kind }}</span>
+      {% if device.drive %} {{ device.drive }}{% endif %}
+      {% if device.volume_label %} · {{ device.volume_label }}{% endif %}
+      · {{ device.node_count }} item(s)
+    </div>
+    {% if device.detail %}
+    <div class="small-note muted shellbags-device-detail" title="{{ device.detail }}">
+      {{ device.detail[:110] }}
+    </div>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted small-note">No devices recovered from ShellBags.</p>
+{% endif %}

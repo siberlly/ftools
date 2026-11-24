@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from .errors import DFIRError
 
@@ -44,6 +44,137 @@ class SecurityPolicy:
 
     def _within_allowed_roots(self, resolved: Path) -> bool:
         return any(resolved.is_relative_to(root) for root in self.allowed_roots)
+
+    def browse_directory(
+        self, raw_path: str | None, *, limit: int = 2000, evidence_only: bool = True
+    ) -> dict[str, Any]:
+        """List one directory for the evidence picker, bounded to the allowlist.
+
+        ``raw_path`` is a directory inside an allowed root, or empty for the
+        roots themselves. Symlinks are never followed for listing; a symlinked
+        directory is only navigable when it resolves inside an allowed root.
+        """
+        entries: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        truncated = False
+        if not raw_path or not str(raw_path).strip():
+            for root in self.allowed_roots:
+                entries.append(
+                    {
+                        "name": root.name or str(root),
+                        "path": str(root),
+                        "kind": "directory",
+                        "size": None,
+                    }
+                )
+            return {
+                "path": "",
+                "parent": None,
+                "roots": [str(root) for root in self.allowed_roots],
+                "entries": entries,
+                "truncated": False,
+                "warnings": warnings,
+            }
+
+        text = str(raw_path)
+        if "\x00" in text:
+            raise PolicyError("path contains a NUL byte")
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            raise PolicyError("path must be absolute")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise PolicyError(f"path does not exist: {text}") from exc
+        except OSError as exc:
+            raise PolicyError(f"cannot resolve path: {exc}") from exc
+        if not resolved.is_dir():
+            raise PolicyError("path is not a directory")
+        if not self._within_allowed_roots(resolved):
+            roots = ", ".join(str(root) for root in self.allowed_roots)
+            raise PolicyError(f"path is outside the allowed roots: {roots}")
+
+        parent = None
+        if resolved not in self.allowed_roots:
+            parent = str(resolved.parent)
+            if not self._within_allowed_roots(resolved.parent.resolve()):
+                raise PolicyError("parent directory is outside the allowed roots")
+
+        try:
+            iterator = os.scandir(resolved)
+        except OSError as exc:
+            raise PolicyError(f"cannot read directory: {exc}") from exc
+        with iterator:
+            for entry in iterator:
+                if len(entries) >= limit:
+                    truncated = True
+                    break
+                try:
+                    is_symlink = entry.is_symlink()
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    is_file = entry.is_file(follow_symlinks=False)
+                except OSError:
+                    continue
+                if entry.name.startswith("."):
+                    # Hidden entries are noise in an evidence picker.
+                    continue
+                if is_symlink:
+                    # A symlink is listed only as a hint, never navigable unless
+                    # it resolves inside the allowlist.
+                    try:
+                        target = Path(entry.path).resolve(strict=True)
+                    except OSError:
+                        warnings.append(f"skipped broken symlink {entry.name}")
+                        continue
+                    if not self._within_allowed_roots(target) or not target.is_dir():
+                        warnings.append(
+                            f"skipped symlink outside the allowed roots: {entry.name}"
+                        )
+                        continue
+                    is_dir = True
+                if is_dir:
+                    entries.append(
+                        {
+                            "name": entry.name,
+                            "path": str(Path(entry.path)),
+                            "kind": "directory",
+                            "size": None,
+                        }
+                    )
+                    continue
+                if not is_file:
+                    continue
+                suffix = Path(entry.name).suffix.lower()
+                if evidence_only and suffix not in EVIDENCE_EXTENSIONS:
+                    continue
+                try:
+                    size = entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    size = None
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "path": str(Path(entry.path)),
+                        "kind": "file",
+                        "size": size,
+                        "extension": suffix,
+                    }
+                )
+        entries.sort(
+            key=lambda item: (
+                0 if item["kind"] == "directory" else 1,
+                item["name"].lower(),
+            )
+        )
+        return {
+            "path": str(resolved),
+            "parent": parent,
+            "roots": [str(root) for root in self.allowed_roots],
+            "entries": entries,
+            "truncated": truncated,
+            "warnings": warnings,
+            "limit": limit,
+        }
 
     def validate_evidence_path(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():

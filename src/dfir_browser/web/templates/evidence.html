@@ -132,6 +132,11 @@
           data-tab-target
           hx-get="/evidence/{{ record.evidence_id }}/event-logs"
           hx-target="#tab-content" hx-swap="innerHTML">Event Logs</button>
+  <button type="button" role="tab" id="tab-shellbags" class="tab"
+          aria-selected="false" aria-controls="tab-content" tabindex="-1"
+          data-tab-target
+          hx-get="/evidence/{{ record.evidence_id }}/shellbags"
+          hx-target="#tab-content" hx-swap="innerHTML">ShellBags</button>
   <button type="button" role="tab" id="tab-browser" class="tab"
           aria-selected="false" aria-controls="tab-content" tabindex="-1"
           data-tab-target

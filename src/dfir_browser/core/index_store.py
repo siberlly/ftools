@@ -1114,6 +1114,21 @@ class IndexStore:
         "downloads.sqlite",
     )
 
+    CREDENTIAL_NAME_PATTERNS = (
+        "Login Data",
+        "Login Data For Account",
+        "logins.json",
+        "logins-backup.json",
+        "signons.sqlite",
+        "key4.db",
+        "key3.db",
+        "cookies.sqlite",
+        "formhistory.sqlite",
+        "Web Data",
+        "Cookies",
+        "Local State",
+    )
+
     def find_browser_artifact_candidates(
         self,
         evidence_id: str,
@@ -1128,9 +1143,48 @@ class IndexStore:
             "evidence_id = ? AND scan_id = ? AND entry_type = 'file' "
             f"AND ({clauses}) "
             "AND (full_path LIKE '%WebCache%' OR full_path LIKE '%User Data%' "
-            "OR full_path LIKE '%Firefox%' OR full_path LIKE '%Mozilla%')"
+            "OR full_path LIKE '%Firefox%' OR full_path LIKE '%Mozilla%' "
+            "OR full_path LIKE '%/.config/google-chrome/%' "
+            "OR full_path LIKE '%/.config/chromium/%' "
+            "OR full_path LIKE '%/.config/microsoft-edge/%' "
+            "OR full_path LIKE '%/.config/BraveSoftware/%' "
+            "OR full_path LIKE '%/.config/opera%' "
+            "OR full_path LIKE '%Opera Software%' "
+            "OR full_path LIKE '%BraveSoftware%' "
+            "OR full_path LIKE '%/.mozilla/%' OR full_path LIKE '%/snap/%')"
         )
         params: list[Any] = [evidence_id, scan_id, *self.BROWSER_NAME_PATTERNS]
+        if not include_deleted:
+            where += " AND deleted = 0"
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT {ENTRY_COLUMNS}, parent_id FROM filesystem_entries "
+                f"WHERE {where} ORDER BY full_path COLLATE NOCASE LIMIT 2000",
+                params,
+            ).fetchall()
+            return [IndexedEntry.from_row(row) for row in rows]
+
+    def find_credential_artifact_candidates(
+        self,
+        evidence_id: str,
+        scan_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> list[IndexedEntry]:
+        clauses = " OR ".join(
+            "basename COLLATE NOCASE = ?" for _ in self.CREDENTIAL_NAME_PATTERNS
+        )
+        where = (
+            "evidence_id = ? AND scan_id = ? AND entry_type = 'file' "
+            f"AND ({clauses}) "
+            "AND (full_path LIKE '%User Data%' "
+            "OR full_path LIKE '%Firefox%' OR full_path LIKE '%Mozilla%' "
+            "OR full_path LIKE '%/.config/%' "
+            "OR full_path LIKE '%Opera Software%' "
+            "OR full_path LIKE '%BraveSoftware%' "
+            "OR full_path LIKE '%/.mozilla/%' OR full_path LIKE '%/snap/%')"
+        )
+        params: list[Any] = [evidence_id, scan_id, *self.CREDENTIAL_NAME_PATTERNS]
         if not include_deleted:
             where += " AND deleted = 0"
         with self._connect() as connection:

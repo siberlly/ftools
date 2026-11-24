@@ -469,6 +469,7 @@ def make_fake_client(
     extraction: ExtractionResult | None = None,
     indexer: FakeIndexer | None = None,
     status: IndexStatus | None = None,
+    index_store: object | None = None,
 ) -> tuple[TestClient, FakeEvidence]:
     allowed = tmp_path / "allowed"
     allowed.mkdir()
@@ -486,6 +487,7 @@ def make_fake_client(
         evidence=evidence,
         filesystem=filesystem,
         indexer=indexer,
+        index_store=index_store,
         cleanup=lambda: None,
     )
     app = create_app(settings, services=services)
@@ -915,3 +917,45 @@ def test_entries_table_escapes_paths(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "<script>alert(4)</script>" not in response.text
     assert "&lt;script&gt;alert(4)&lt;/script&gt;" in response.text
+
+
+class FakeIndexStore:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def list_parse_errors(self, evidence_id, scan_id, limit=20):
+        return list(self.rows)
+
+
+def test_index_card_lists_skipped_fls_lines(tmp_path: Path) -> None:
+    status = make_index_status(
+        "incomplete",
+        entries_indexed=326719,
+        parse_errors=1,
+        warning=(
+            "Filesystem index is incomplete: 1 of 326720 entries could not be "
+            "parsed (0.0003%). 326719 entries are searchable; the skipped "
+            "lines are listed below."
+        ),
+    )
+    store = FakeIndexStore(
+        [
+            {
+                "line_no": 29882,
+                "error": "line has an empty basename",
+                "raw_line": "-/- * 3146616:\thome/rafael/.cache/entries/",
+            }
+        ]
+    )
+    client = make_fake_client(
+        tmp_path,
+        indexer=FakeIndexer(status=status),
+        status=status,
+        index_store=store,
+    )[0]
+    response = client.get(f"/evidence/{EVIDENCE_ID}")
+    assert response.status_code == 200
+    assert "Filesystem index is incomplete: 1 of 326720" in response.text
+    assert "Skipped fls lines (1)" in response.text
+    assert "line has an empty basename" in response.text
+    assert "29882" in response.text

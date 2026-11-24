@@ -47,6 +47,12 @@
     </div>
   </div>
 
+  <div class="browser-credentials-slot"
+       hx-get="/evidence/{{ record.evidence_id }}/browser/credentials?artifact_id={{ artifact.artifact_id }}"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p class="muted small-note">Loading credential-store metadata…</p>
+  </div>
+
   <div class="browser-summary-slot"
        hx-get="/evidence/{{ record.evidence_id }}/browser/summary?artifact_id={{ artifact.artifact_id }}"
        hx-trigger="load" hx-swap="innerHTML">

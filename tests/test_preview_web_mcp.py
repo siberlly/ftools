@@ -285,3 +285,32 @@ def test_mcp_pagination_matches_offsets(env):
     )
     assert second["offset"] == first["next_offset"]
     assert second["returned_bytes"] == 1000
+
+
+def test_preview_panel_offers_larger_pages_and_download(env):
+    client, services, record = env
+    big = entry_id(services, BIG_PATH)
+    body = client.get(
+        f"/evidence/{EVIDENCE}/entries/{big}/preview/panel?limit=1024"
+    ).text
+    assert "Load 256 KiB" in body
+    assert "Load 1 MiB" in body
+    assert "Download full copy" in body
+    assert "/download" in body
+
+
+def test_download_endpoint(env):
+    client, services, record = env
+    hosts = entry_id(services, HOSTS_PATH)
+    response = client.get(f"/evidence/{EVIDENCE}/entries/{hosts}/download")
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "www.malware430.com" in response.content.decode("utf-8")
+
+
+def test_download_rejects_unknown_evidence(env):
+    client, services, record = env
+    hosts = entry_id(services, HOSTS_PATH)
+    response = client.get(f"/evidence/ev_000000000000/entries/{hosts}/download")
+    assert response.status_code == 400

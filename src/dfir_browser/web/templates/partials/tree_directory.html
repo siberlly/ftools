@@ -57,10 +57,11 @@
       <thead>
         <tr>
           <th>Name</th><th>Type</th><th>Size</th><th class="num">MFT</th>
-          <th>Modified (UTC)</th><th>Status</th>
+          <th>Modified (UTC)</th><th>Deleted at (UTC)</th><th>Status</th>
         </tr>
       </thead>
       <tbody>
+        {% set hints = recycle_hints if recycle_hints is defined and recycle_hints else {} %}
         {% for child in page.children %}
         <tr class="{% if child.deleted %}deleted{% endif %}">
           <td class="name">
@@ -79,6 +80,21 @@
           <td>{{ child.size|filesize }}</td>
           <td class="num">{{ child.inode if child.inode is not none else "" }}</td>
           <td class="nowrap">{{ child.modified_time or "unknown" }}</td>
+          <td class="nowrap small-note">
+            {% if hints.get(child.entry_id) %}
+              {% set hint = hints[child.entry_id] %}
+              {% if hint.deleted_time_utc %}
+              <strong>{{ hint.deleted_time_utc }}</strong>
+              <div class="muted" title="{{ hint.original_path or '' }}">
+                {{ hint.original_path or "" }}
+              </div>
+              {% else %}
+              <span class="muted">{{ hint.reason or "unknown" }}</span>
+              {% endif %}
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td class="nowrap">
             {% if child.deleted %}
               <span class="badge deleted">DELETED</span>
@@ -91,7 +107,7 @@
         </tr>
         {% endfor %}
         {% if not page.children %}
-        <tr><td colspan="6" class="muted">This directory is empty or has no loadable children.</td></tr>
+        <tr><td colspan="7" class="muted">This directory is empty or has no loadable children.</td></tr>
         {% endif %}
       </tbody>
     </table>

@@ -162,7 +162,97 @@
     });
   }
 
+  function loadSqliteRows(wrap, table, offset, limit) {
+    var target = wrap.querySelector("#preview-sqlite-rows");
+    if (!target) return;
+    var evidence = wrap.getAttribute("data-preview-evidence");
+    var entry = wrap.getAttribute("data-preview-entry");
+    var url =
+      "/evidence/" + encodeURIComponent(evidence) +
+      "/entries/" + encodeURIComponent(entry) +
+      "/sqlite/panel?table=" + encodeURIComponent(table) +
+      "&offset=" + encodeURIComponent(String(offset || 0)) +
+      (limit ? "&limit=" + encodeURIComponent(String(limit)) : "");
+    target.textContent = "";
+    target.appendChild(el("p", "muted small-note", "Loading rows…"));
+    fetch(url, { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.text();
+      })
+      .then(function (html) {
+        var template = document.createElement("template");
+        template.innerHTML = html;
+        target.textContent = "";
+        target.appendChild(template.content);
+        target.setAttribute("data-sqlite-offset", String(offset || 0));
+        if (window.htmx && typeof window.htmx.process === "function") {
+          window.htmx.process(target);
+        }
+      })
+      .catch(function (err) {
+        target.textContent = "";
+        target.appendChild(el("p", "badge deleted", "Could not load rows: " + err.message));
+      });
+  }
+
   document.addEventListener("click", function (event) {
+    var tableBtn = event.target.closest("button[data-sqlite-table]");
+    if (tableBtn) {
+      event.preventDefault();
+      var wrap = tableBtn.closest(".preview-wrap");
+      if (wrap) loadSqliteRows(wrap, tableBtn.getAttribute("data-sqlite-table"), 0);
+      return;
+    }
+    var limitBtn = event.target.closest("[data-sqlite-limit]");
+    if (limitBtn) {
+      event.preventDefault();
+      var limitWrap = limitBtn.closest(".preview-wrap");
+      if (limitWrap) {
+        var nameEl = limitWrap.querySelector("[data-sqlite-table-name]");
+        var name = nameEl ? nameEl.getAttribute("data-sqlite-table-name") : null;
+        var box = limitWrap.querySelector("#preview-sqlite-rows");
+        var offset = box
+          ? parseInt(box.getAttribute("data-sqlite-offset") || "0", 10)
+          : 0;
+        if (name) {
+          loadSqliteRows(
+            limitWrap,
+            name,
+            offset,
+            parseInt(limitBtn.getAttribute("data-sqlite-limit"), 10)
+          );
+        }
+      }
+      return;
+    }
+    var toggleCols = event.target.closest("[data-sqlite-toggle-columns]");
+    if (toggleCols) {
+      event.preventDefault();
+      var host2 = toggleCols.closest(".preview-wrap");
+      var table = host2 ? host2.querySelector("[data-sqlite-rows-table]") : null;
+      if (table) {
+        table.classList.toggle("show-all-columns");
+        toggleCols.textContent = table.classList.contains("show-all-columns")
+          ? "Fewer columns"
+          : "All columns";
+      }
+      return;
+    }
+    var pageBtn = event.target.closest("[data-sqlite-page]");
+    if (pageBtn) {
+      event.preventDefault();
+      var host = pageBtn.closest(".preview-wrap");
+      if (host) {
+        loadSqliteRows(
+          host,
+          pageBtn.getAttribute("data-sqlite-page"),
+          parseInt(pageBtn.getAttribute("data-sqlite-offset") || "0", 10)
+        );
+      }
+      return;
+    }
+
     var load = event.target.closest("[data-preview-load]");
     if (load) {
       event.preventDefault();
@@ -182,6 +272,7 @@
       loadPreview(wrap, {
         mode: goto.getAttribute("data-preview-mode") || "auto",
         offset: goto.getAttribute("data-preview-goto") || 0,
+        limit: goto.getAttribute("data-preview-limit") || null,
       });
       return;
     }

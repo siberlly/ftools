@@ -408,3 +408,19 @@ button.tab[aria-selected="true"] { border-color: var(--line); background: var(--
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Long evidence names/IDs must wrap instead of widening the page. */
+.page-header > * { min-width: 0; }
+.page-header h1 { overflow-wrap: anywhere; }
+.heading-meta code { overflow-wrap: anywhere; }
+
+/* Narrow screens: wrap the tab strip instead of widening the page. */
+@media (max-width: 700px) {
+  .tabs { flex-wrap: wrap; overflow-x: visible; }
+  .tabs button.tab { flex: 0 1 auto; }
+}
+
+/* Long unbroken evidence strings must wrap, never widen the page. */
+main p, main li, main dd, main dt, main code, main td, main th, main summary {
+  overflow-wrap: anywhere;
+}

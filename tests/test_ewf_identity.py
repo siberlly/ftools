@@ -313,12 +313,17 @@ def test_managed_mount_per_evidence_and_cleanup_only_managed(
     assert Path(record_b.raw_exposure_path).parent.name == record_b.evidence_id
     assert Path(record_c.raw_exposure_path).parent.name == record_c.evidence_id
     assert Path(record_b.raw_exposure_path) != Path(record_c.raw_exposure_path)
+    # The marker is a sibling of the mount point: writing inside an ewfmount
+    # FUSE filesystem fails with ENOSYS.
     assert (
+        settings.var_dir / "mounts" / f"{record_b.evidence_id}.managed.json"
+    ).is_file()
+    assert not (
         settings.var_dir
         / "mounts"
         / record_b.evidence_id
         / ".dfir-managed.json"
-    ).is_file()
+    ).exists()
     assert provider.managed_mounts
 
     provider.cleanup_managed()
@@ -433,3 +438,49 @@ def test_source_mtime_change_after_registration_is_rejected(
     with pytest.raises(EvidenceAccessError) as excinfo:
         service.ensure_image(record)
     assert excinfo.value.code == "source_changed"
+
+
+def test_missing_managed_exposure_is_recreated(tmp_path: Path) -> None:
+    """After a restart the ewfmount exposure is gone; re-create it."""
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = make_source(allowed, "disk.E01", b"A" * 100)
+    settings, service, _provider, _registry, _allowed, runner = make_env(
+        tmp_path, mappings={}, automount=True
+    )
+    record = service.register(str(source))
+    exposure = Path(record.raw_exposure_path)
+    assert exposure.is_file()
+
+    # Simulate process shutdown: the FUSE mount and its directory disappear.
+    exposure.unlink()
+    exposure.parent.rmdir()
+    assert not exposure.exists()
+
+    rebuilt = service.ensure_image(record)
+    assert rebuilt.is_file()
+    assert rebuilt == exposure
+    persisted = service.get(record.evidence_id)
+    assert persisted.raw_exposure_path == str(rebuilt)
+    mounts = [
+        argv for argv, _kw in runner.calls if argv[0] == "ewfmount"
+    ]
+    assert len(mounts) == 2
+
+
+def test_stale_managed_mount_directory_is_rebuilt(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = make_source(allowed, "disk.E01", b"A" * 100)
+    settings, service, _provider, _registry, _allowed, runner = make_env(
+        tmp_path, mappings={}, automount=True
+    )
+    record = service.register(str(source))
+    exposure = Path(record.raw_exposure_path)
+    # Directory and marker still exist, but the mounted image is gone.
+    exposure.unlink()
+    assert exposure.parent.is_dir()
+
+    rebuilt = service.ensure_image(record)
+    assert rebuilt.is_file()
+    assert rebuilt.read_bytes()

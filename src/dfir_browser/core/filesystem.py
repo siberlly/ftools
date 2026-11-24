@@ -101,16 +101,52 @@ def detect_layout(
         mmls_parsed = parse_mmls(mmls_result.stdout)
 
     if mmls_parsed.get("data_slots"):
-        first = mmls_parsed["data_slots"][0]
         unit_bytes = int(mmls_parsed.get("unit_bytes") or 512)
-        offset = int(first["start_sectors"]) * unit_bytes // 512
-        fs_result = runner.run(
-            ["fsstat", "-o", str(offset), str(image_path)],
-            timeout=timeout,
-            evidence_id=evidence_id,
-        )
-        fs_info = parse_fsstat(fs_result.stdout) if fs_result.ok else {}
-        if fs_result.ok and fs_info.get("filesystem"):
+        # Probe every data partition: a GPT disk starts with an EFI system
+        # partition, so the first data slot is often FAT32, not the evidence
+        # volume. Prefer an NTFS volume when one exists.
+        probed: list[tuple[dict[str, Any], int, dict[str, Any]]] = []
+        for slot in mmls_parsed["data_slots"]:
+            offset = int(slot["start_sectors"]) * unit_bytes // 512
+            slot_result = runner.run(
+                ["fsstat", "-o", str(offset), str(image_path)],
+                timeout=timeout,
+                evidence_id=evidence_id,
+            )
+            slot_info = parse_fsstat(slot_result.stdout) if slot_result.ok else {}
+            if slot_result.ok and slot_info.get("filesystem"):
+                probed.append((slot, offset, slot_info))
+        if probed:
+            def _is_efi(item) -> bool:
+                description = str(item[0].get("description") or "").lower()
+                filesystem = str(item[2].get("filesystem") or "").upper()
+                return "efi" in description or (
+                    filesystem in {"FAT12", "FAT16", "FAT32"}
+                    and "efi" in description
+                )
+
+            pool = [item for item in probed if not _is_efi(item)] or probed
+            ntfs = [
+                item
+                for item in pool
+                if str(item[2].get("filesystem", "")).upper() == "NTFS"
+            ]
+            if ntfs:
+                chosen = ntfs[0]
+            else:
+                # No NTFS: take the largest data partition, which is the OS
+                # volume on Linux/macOS disks (the EFI partition is small).
+                chosen = max(
+                    pool, key=lambda item: int(item[0].get("length_sectors") or 0)
+                )
+            slot, offset, fs_info = chosen
+            if len(probed) > 1:
+                warnings.append(
+                    "image contains "
+                    f"{len(probed)} filesystems "
+                    f"({', '.join(str(item[2].get('filesystem')) for item in probed)}); "
+                    f"selected {fs_info.get('filesystem')} at sector {slot['start_sectors']}"
+                )
             return Layout(
                 scope="partition",
                 filesystem=fs_info["filesystem"],
@@ -118,14 +154,22 @@ def detect_layout(
                 method="mmls+fsstat",
                 details={
                     **fs_info,
-                    "partition_slot": first["slot"],
-                    "partition_description": first["description"],
+                    "partition_slot": slot["slot"],
+                    "partition_description": slot.get("description"),
                     "partition_start_sectors": offset,
+                    "partition_candidates": [
+                        {
+                            "slot": item[0]["slot"],
+                            "start_sectors": item[0]["start_sectors"],
+                            "filesystem": item[2].get("filesystem"),
+                        }
+                        for item in probed
+                    ],
                 },
                 warnings=warnings,
             )
         warnings.append(
-            f"fsstat failed at mmls partition offset {offset}; "
+            "fsstat failed at every mmls partition offset; "
             "falling back to fsstat at sector 0"
         )
     elif mmls_result.ok and (mmls_result.stdout or "").strip():
@@ -641,6 +685,15 @@ class FilesystemService:
         return result
 
     def extract_entry(self, record, entry, case_id: str) -> ExtractionResult:
+        # Follow a symlink inside the evidence: icat returns the link inode
+        # zeros on Ext4, so extracting the link yields empty bytes.
+        resolver = getattr(self, "symlink_resolver", None)
+        if resolver is not None and str(
+            getattr(entry, "fls_type", "") or ""
+        ).startswith("l"):
+            target, _note = resolver(record, entry)
+            if target is not None:
+                entry = target
         if entry.backend_type == "ad1":
             return self.extract_indexed(record, entry, case_id)
         from .backends import TskEvidenceBackend

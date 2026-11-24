@@ -24,6 +24,9 @@ from .evtx.service import EvtxService
 from .browser_artifacts.index import BrowserStore
 from .browser_artifacts.service import BrowserArtifactService
 from .preview import FilePreviewService
+from .recycle import RecycleBinService
+from .shellbags.index import ShellbagStore
+from .shellbags.service import ShellbagService
 from .investigation import InvestigationService
 
 
@@ -50,9 +53,14 @@ class Services:
     browser_store: BrowserStore
     browser_artifacts: BrowserArtifactService
     preview: FilePreviewService
+    recycle_bin: RecycleBinService
+    shellbag_store: ShellbagStore
+    shellbags: ShellbagService
     investigation: InvestigationService
 
     def cleanup(self) -> None:
+        self.shellbags.cleanup()
+        self.recycle_bin.cleanup()
         self.preview.cleanup()
         self.investigation._pool.shutdown(wait=False, cancel_futures=True)
         self.evtx.cleanup()
@@ -174,6 +182,28 @@ def build_services(settings: Settings | None = None) -> Services:
         audit=audit,
         store=browser_store,
     )
+    shellbag_store = ShellbagStore(settings.shellbag_database())
+    shellbag_store.ensure_schema()
+    shellbags = ShellbagService(
+        settings=settings,
+        policy=policy,
+        filesystem=filesystem,
+        evidence=evidence,
+        indexer=indexer,
+        index_store=index_store,
+        audit=audit,
+        store=shellbag_store,
+        registry_store=registry_store,
+    )
+    recycle_bin = RecycleBinService(
+        settings=settings,
+        policy=policy,
+        filesystem=filesystem,
+        evidence=evidence,
+        indexer=indexer,
+        index_store=index_store,
+        audit=audit,
+    )
     preview = FilePreviewService(
         settings=settings,
         policy=policy,
@@ -181,6 +211,12 @@ def build_services(settings: Settings | None = None) -> Services:
         evidence=evidence,
         indexer=indexer,
         audit=audit,
+        index_store=index_store,
+    )
+    from .symlink import resolve_target as _resolve_symlink_target
+
+    filesystem.symlink_resolver = lambda record, entry: _resolve_symlink_target(
+        record, entry, filesystem=filesystem, index_store=index_store
     )
     preview.attach_registry_lookup(
         lambda evidence_id, entry_id: _hive_summary(
@@ -210,6 +246,9 @@ def build_services(settings: Settings | None = None) -> Services:
         browser_store=browser_store,
         browser_artifacts=browser_artifacts,
         preview=preview,
+        recycle_bin=recycle_bin,
+        shellbag_store=shellbag_store,
+        shellbags=shellbags,
         investigation=investigation,
     )
 

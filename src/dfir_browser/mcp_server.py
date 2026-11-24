@@ -476,13 +476,234 @@ def filesystem_tree_ancestors(
 
 
 @mcp.tool(
+    name="preview_sqlite_table",
+    description=(
+        "Read-only rows from one table of a SQLite database inside the "
+        "evidence (browser History/places.sqlite, app caches, and similar). "
+        "The database is opened with mode=ro&immutable=1 and PRAGMA query_only, "
+        "so nothing is written and WAL files are not replayed. The table name "
+        "must exist in the schema; values are returned as structured cells "
+        "(text/number/blob/null) and BLOBs are hex-truncated. Rows are capped by "
+        "the server limits. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def preview_sqlite_table(
+    evidence_id: str,
+    entry_id: int,
+    table: str,
+    offset: int = 0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            record = services.evidence.get(evidence_id)
+            return _with_trust(
+                services.preview.sqlite_rows(
+                    record, entry_id, table, offset=offset, limit=limit
+                )
+            )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="recycle_bin_metadata",
+    description=(
+        "Read-only Recycle Bin metadata for one $I or $R entry: the deletion "
+        "time from the $I record, the original path and original size, the "
+        "owner SID, the matching $R content entry and its allocation state. "
+        "Useful to answer when a file was deleted and where it came from. "
+        "$R content is never opened; filesystem timestamps are returned "
+        "separately and are not the deletion time. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def recycle_bin_metadata(
+    evidence_id: str, entry_id: int
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            record = services.evidence.get(evidence_id)
+            result = services.recycle_bin.metadata(record, entry_id)
+            return _with_trust(result.to_dict())
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_index_start",
+    description=(
+        "Start (or rebuild) the ShellBags index for one evidence. UsrClass.dat "
+        "and NTUSER.DAT hives are discovered from the filesystem index, "
+        "extracted read-only and parsed offline. No registry export and no "
+        "manual command is required. " + UNTRUSTED_NOTE
+    ),
+    annotations=INDEX_START,
+)
+def shellbags_index_start(
+    evidence_id: str, rebuild: bool = False
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            record = services.evidence.get(evidence_id)
+            return _with_trust(
+                services.shellbags.start(record, rebuild=rebuild)
+            )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_index_status",
+    description=(
+        "Read-only ShellBags index state: not_indexed/queued/running/ready/"
+        "partial/failed/empty, progress, hive, node and device counts, errors "
+        "and warnings. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def shellbags_index_status(evidence_id: str) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            return _with_trust(services.shellbags.state(evidence_id))
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_list_devices",
+    description=(
+        "Devices recovered from ShellBags: name (for example an MTP phone), "
+        "kind (mtp/usb/portable/volume), drive letter, volume label, user SID, "
+        "shellbag node id and item count. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def shellbags_list_devices(evidence_id: str) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            return _with_trust(services.shellbags.devices(evidence_id))
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_tree",
+    description=(
+        "Read-only ShellBags folder tree. Pass parent_id to descend one level "
+        "(omit for the roots). Each item returns its full recovered path, shell "
+        "item type, BagMRU key last-write time, user SID and node id for "
+        "shellbags_get_node. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def shellbags_tree(
+    evidence_id: str,
+    parent_id: int | None = None,
+    hive_id: str | None = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            return _with_trust(
+                services.shellbags.tree(
+                    evidence_id,
+                    parent_id=parent_id,
+                    hive_id=hive_id,
+                    page=page,
+                    page_size=page_size,
+                )
+            )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_search",
+    description=(
+        "Read-only ShellBags search over folder names, full paths, drives and "
+        "volume labels. Filters: kind (device/folder/file), user_sid, "
+        "device_id and ISO-8601 time_from/time_to on the BagMRU last-write "
+        "time. Returns paginated nodes with their registry source. "
+        + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def shellbags_search(
+    evidence_id: str,
+    query: str | None = None,
+    kind: str | None = None,
+    user_sid: str | None = None,
+    device_id: int | None = None,
+    hive_id: str | None = None,
+    time_from: str | None = None,
+    time_to: str | None = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            return _with_trust(
+                services.shellbags.search(
+                    evidence_id,
+                    query=query,
+                    kind=kind,
+                    user_sid=user_sid,
+                    device_id=device_id,
+                    hive_id=hive_id,
+                    time_from=time_from,
+                    time_to=time_to,
+                    page=page,
+                    page_size=page_size,
+                )
+            )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="shellbags_get_node",
+    description=(
+        "Read-only detail for one ShellBags node: full path, breadcrumb, shell "
+        "item type, embedded item timestamps, BagMRU key last-write time and "
+        "the exact registry key/value it came from. Use the returned registry "
+        "link with the registry tools to see the raw key. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def shellbags_get_node(node_id: int) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            payload = services.shellbags.node(node_id)
+            return _with_trust(payload)
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
     name="preview_file_content",
     description=(
         "Read-only preview of the content of one indexed file entry. The bytes "
         "come from an extracted working copy inside the case export directory; "
         "nothing is executed, imported, parsed as a program or opened by an "
         "external application. mode is auto|text|hex only. auto decodes text "
-        "with UTF-8/UTF-16/Latin-1 detection, switches binary content to a hex "
+        "with UTF-8/UTF-16/Latin-1 detection, returns preview_mode=image with "
+        "dimensions for raster images (PNG/JPEG/GIF/BMP/WebP/TIFF; SVG is kept "
+        "as text and never rendered), switches other binary content to a hex "
         "view, and returns metadata plus a bounded header view for a Windows "
         "registry hive (it never dumps a whole hive; use the registry tools). "
         "limit defaults to 64 KiB and may not exceed 1 MiB. Use offset to page "
@@ -1492,6 +1713,74 @@ def browser_get_record(
             return _with_trust(
                 services.browser_artifacts.get_record(record_type, record_id)
             )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="browser_credential_stores",
+    description=(
+        "Metadata-only inventory of the credential stores next to one browser "
+        "artifact: logins.json, key4.db/key3.db, cert9.db, cookies.sqlite, "
+        "formhistory.sqlite and Chromium Login Data/Web Data/Cookies/Local "
+        "State. Returns presence, size, record counts and host or field names. "
+        "Passwords, usernames, cookie values, encrypted blobs, keys and tokens "
+        "are never read, decrypted or returned. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def browser_credential_stores(
+    evidence_id: str, artifact_id: str
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            return _with_trust(
+                services.browser_artifacts.credential_stores(
+                    evidence_id, artifact_id
+                )
+            )
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
+    name="browser_credentials_analysis",
+    description=(
+        "Forensic analysis of saved browser credentials across Chrome, Chromium, "
+        "Firefox, Edge, Brave and Opera profiles. Returns website, browser brand, "
+        "engine, profile, created and last used UTC timestamps, times used, "
+        "protection status (DPAPI, OSCrypt AES-GCM, NSS, Plaintext, Unknown), "
+        "and complete forensic provenance (source path, inode, partition offset, SHA-256). "
+        "Sensitive information (usernames) is masked by default, and passwords/keys "
+        "are NEVER decrypted, executed or revealed. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def browser_credentials_analysis(
+    evidence_id: str,
+    artifact_id: str | None = None,
+    browser: str | None = None,
+    profile: str | None = None,
+    protection: str | None = None,
+    query: str | None = None,
+    unmask: bool = False,
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            result = services.browser_artifacts.analyze_credentials(
+                evidence_id,
+                artifact_id=artifact_id,
+                mask_sensitive=not unmask,
+                browser_filter=browser,
+                profile_filter=profile,
+                query=query,
+                protection_filter=protection,
+            )
+            return _with_trust(result.to_dict())
         except USER_ERRORS as exc:
             raise _fail(exc) from exc
 

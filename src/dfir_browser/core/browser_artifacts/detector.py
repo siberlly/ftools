@@ -12,17 +12,113 @@ ESE_MAGIC_OFFSET = 4
 ESE_MAGIC = b"\xef\xcd\xab\x89"
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
-USER_RE = re.compile(r"(?:^|/)Users/([^/]+)/", re.IGNORECASE)
+USER_RE = re.compile(r"(?:^|/)(?:Users|home)/([^/]+)/", re.IGNORECASE)
+# Windows: <browser>/User Data/<profile>/History
+# Linux:   ~/.config/google-chrome/<profile>/History, snap/chromium/.../User Data/...
 CHROMIUM_RE = re.compile(
-    r"(?:Microsoft[ /]?Edge|Google/Chrome)/User Data/([^/]+)/History$",
+    r"(?:Microsoft[ /]?Edge|Google/Chrome|Chromium|BraveSoftware/Brave-Browser)/User Data/([^/]+)/History$",
     re.IGNORECASE,
 )
+CHROMIUM_LINUX_RE = re.compile(
+    r"(?:google-chrome|chromium|microsoft-edge|BraveSoftware/Brave-Browser)(?:-beta|-dev)?/([^/]+)/History$",
+    re.IGNORECASE,
+)
+OPERA_RE = re.compile(
+    r"(?:Opera Software/([^/]+)|/\.config/opera(?:-beta)?)/History$",
+    re.IGNORECASE,
+)
+# Windows: <...>/Firefox/Profiles/<profile>/places.sqlite
+# Linux:   ~/.mozilla/firefox/<profile>/places.sqlite
+# Snap:    snap/firefox/common/.mozilla/firefox/<profile>/places.sqlite
 FIREFOX_RE = re.compile(
-    r"(?:Mozilla/)?Firefox/Profiles/([^/]+)/places\.sqlite$", re.IGNORECASE
+    r"(?:Mozilla/)?Firefox/(?:Profiles/)?([^/]+)/places\.sqlite$", re.IGNORECASE
 )
 WEBCACHE_RE = re.compile(
     r"Microsoft/Windows/WebCache/WebCacheV\d+\.dat$", re.IGNORECASE
 )
+
+
+def identify_browser_details(path: str) -> tuple[str, str, str | None, str]:
+    """Identify browser brand, engine, profile name, and human label from path.
+
+    Returns:
+        (brand, engine, profile_name, label)
+    """
+    p = path.replace("\\", "/")
+    lowered = p.lower()
+
+    brand = "unknown"
+    engine = "unknown"
+    label = "Unknown"
+    profile = None
+
+    # Detect brand and engine
+    if "microsoft/edge" in lowered or "microsoft edge" in lowered or "microsoft-edge" in lowered:
+        brand = "edge"
+        engine = "chromium"
+        label = "Microsoft Edge"
+    elif "google/chrome" in lowered or "google chrome" in lowered or "google-chrome" in lowered:
+        brand = "chrome"
+        engine = "chromium"
+        label = "Google Chrome"
+    elif "bravesoftware" in lowered or "brave-browser" in lowered or "/brave/" in lowered:
+        brand = "brave"
+        engine = "chromium"
+        label = "Brave"
+    elif "opera software" in lowered or "/opera" in lowered:
+        brand = "opera"
+        engine = "chromium"
+        label = "Opera"
+    elif "chromium" in lowered:
+        brand = "chromium"
+        engine = "chromium"
+        label = "Chromium"
+    elif "firefox" in lowered or "mozilla" in lowered:
+        brand = "firefox"
+        engine = "gecko"
+        label = "Mozilla Firefox"
+    elif "webcache" in lowered:
+        brand = "webcache"
+        engine = "trident"
+        label = "IE / Legacy Edge (WebCacheV01.dat)"
+
+    # Detect profile
+    if "user data/" in lowered:
+        m = re.search(r"User Data/([^/]+)", p, re.IGNORECASE)
+        if m:
+            profile = m.group(1)
+    elif brand in {"chrome", "chromium", "edge", "brave"}:
+        matches = re.findall(
+            r"(?:google-chrome|chromium|microsoft-edge|Brave-Browser)(?:-beta|-dev)?/([^/]+)",
+            p,
+            re.IGNORECASE,
+        )
+        for cand in reversed(matches):
+            if cand.lower() not in {"dictionaries", "crashpad", "widevinecdm", "common", "current"}:
+                profile = cand
+                break
+    elif brand == "opera":
+        m = re.search(r"Opera Software/([^/]+)", p, re.IGNORECASE)
+        if m:
+            profile = m.group(1)
+        elif "/.config/opera" in lowered:
+            m = re.search(r"/\.config/opera(?:-beta)?/(.+)$", p, re.IGNORECASE)
+            if m:
+                rest = m.group(1).split("/")
+                profile = rest[0] if len(rest) > 1 else "Default"
+            else:
+                profile = "Default"
+    elif brand == "firefox":
+        m = (
+            re.search(r"(?:Profiles|\.mozilla/firefox)/([^/]+)", p, re.IGNORECASE)
+            or re.search(r"(?:^|/)firefox/(?:Profiles/)?([^/]+)", p, re.IGNORECASE)
+        )
+        if m:
+            candidate = m.group(1)
+            if candidate.lower() not in {"crash reports", "pending pings", "profiles", "common"}:
+                profile = candidate
+
+    return brand, engine, profile, label
 
 
 @dataclass(slots=True)
@@ -65,7 +161,8 @@ def classify_entry(entry, *, evidence_id: str) -> ArtifactCandidate | None:
     confidence = 0.0
     reasons: list[str] = []
 
-    chromium = CHROMIUM_RE.search(path)
+    chromium = CHROMIUM_RE.search(path) or CHROMIUM_LINUX_RE.search(path)
+    opera = OPERA_RE.search(path)
     firefox = FIREFOX_RE.search(path)
     webcache = WEBCACHE_RE.search(path)
     if webcache and lowered.startswith("webcachev") and lowered.endswith(".dat"):
@@ -75,6 +172,10 @@ def classify_entry(entry, *, evidence_id: str) -> ArtifactCandidate | None:
         browser, artifact_type = "chromium", "chromium_history"
         profile = chromium.group(1)
         confidence, reasons = 0.97, ["Chromium User Data profile History"]
+    elif opera and lowered == "history":
+        browser, artifact_type = "chromium", "chromium_history"
+        profile = opera.group(1) or "Opera Stable"
+        confidence, reasons = 0.97, ["Opera profile History"]
     elif firefox and lowered == "places.sqlite":
         browser, artifact_type = "firefox", "firefox_places"
         profile = firefox.group(1)
@@ -82,9 +183,23 @@ def classify_entry(entry, *, evidence_id: str) -> ArtifactCandidate | None:
     else:
         return None
 
-    if "/appdata/" not in path.lower():
-        confidence = max(0.4, confidence - 0.3)
-        reasons.append("not under AppData")
+    lowered_path = path.lower()
+    if "/appdata/" not in lowered_path:
+        if any(
+            marker in lowered_path
+            for marker in (
+                "/.mozilla/",
+                "/.config/",
+                "/snap/",
+                "user data",
+                "opera software",
+                "bravesoftware",
+            )
+        ):
+            reasons.append("Linux/snap browser profile path")
+        else:
+            confidence = max(0.4, confidence - 0.3)
+            reasons.append("not under a known browser profile path")
     size = entry.size
     warnings: list[str] = []
     return ArtifactCandidate(

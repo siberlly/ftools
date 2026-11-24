@@ -463,3 +463,37 @@ def test_search_form_enter_contract(client) -> None:
     assert forms.status_code == 200
     assert '"Enter"' in forms.text
     assert "requestSubmit" in forms.text
+
+
+def test_right_pane_click_reveals_unloaded_entry(client) -> None:
+    """A directory listing link must work even when the node is not in the tree.
+
+    The right pane lists direct children; the left tree only holds expanded
+    nodes. Clicking a child that was never expanded used to do nothing because
+    nodeById() returned null. The handler must fall back to revealEntry().
+    """
+    tree_js = client.get("/static/tree.js")
+    assert tree_js.status_code == 200
+    script = tree_js.text
+    assert "bindPanel" in script
+    marker = "data-tree-open-id"
+    assert marker in script
+    # The unloaded-node branch must call revealEntry before bailing out.
+    unloaded = script.split("var node = self.nodeById(id);", 1)[1].split(
+        "});", 1
+    )[0]
+    assert "if (!node)" in unloaded
+    assert "revealEntry(id)" in unloaded
+    # And it must return instead of falling through to selectNode.
+    assert "return;" in unloaded
+
+
+def test_tree_children_cache_key_includes_page_size(client) -> None:
+    """A 100-item page and a 500-item page must not share a cache entry.
+
+    Reveal asks for a large page; without the page size in the key it reused a
+    cached 100-item page and could not find deeper children (for example
+    etc/os-release among 236 entries).
+    """
+    script = client.get("/static/tree.js").text
+    assert 'var key = id + ":" + page + ":" + pageSize;' in script

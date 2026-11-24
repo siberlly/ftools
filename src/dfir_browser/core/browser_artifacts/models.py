@@ -14,8 +14,40 @@ RECORD_TYPES = {"download", "visit", "cache", "profile"}
 BROWSERS = {
     "webcache": "IE / Legacy Edge (WebCacheV01.dat)",
     "chromium": "Chromium (Edge / Chrome History)",
+    "chrome": "Google Chrome",
+    "edge": "Microsoft Edge",
+    "brave": "Brave",
+    "opera": "Opera",
     "firefox": "Firefox (places.sqlite)",
     "unknown": "Unknown",
+}
+
+BROWSER_BRANDS = {
+    "chrome": "Google Chrome",
+    "chromium": "Chromium",
+    "edge": "Microsoft Edge",
+    "brave": "Brave",
+    "opera": "Opera",
+    "firefox": "Mozilla Firefox",
+    "webcache": "IE / Legacy Edge",
+    "unknown": "Unknown",
+}
+
+BROWSER_ENGINES = {
+    "chromium": "Chromium (Blink)",
+    "gecko": "Gecko",
+    "trident": "Trident/EdgeHTML",
+    "unknown": "Unknown",
+}
+
+PROTECTION_STATUSES = {
+    "UNKNOWN": "Unknown / Unverified",
+    "WINDOWS_DPAPI": "Windows DPAPI",
+    "OSCRYPT_AES_GCM": "OSCrypt AES-256-GCM",
+    "OSCRYPT_LINUX": "OSCrypt Linux Desktop Keyring / Obfuscated",
+    "NSS_ENCRYPTED": "NSS Encrypted",
+    "PLAINTEXT": "Plaintext / Unencrypted",
+    "EMPTY": "Empty / No Password",
 }
 ARTIFACT_TYPES = {
     "webcache": "WebCache",
@@ -346,3 +378,77 @@ def profile_id_for(evidence_id: str, browser: str, user: str | None, profile: st
 
     key = f"{evidence_id}:{browser}:{user or ''}:{profile or ''}"
     return "bp_" + hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+@dataclass(slots=True)
+class CredentialRecord:
+    record_id: str
+    website: str
+    action_url: str | None
+    brand: str
+    brand_label: str
+    engine: str
+    browser: str
+    profile: str
+    user: str | None
+    username_element: str | None
+    username_masked: str
+    username_raw: str | None
+    has_password: bool
+    password_masked: str
+    password_element: str | None
+    protection_status: str
+    protection_details: str
+    created_time_utc: str | None
+    created_time_raw: str | None
+    last_used_time_utc: str | None
+    last_used_time_raw: str | None
+    password_changed_utc: str | None = None
+    password_changed_raw: str | None = None
+    times_used: int = 0
+    source_path: str = ""
+    source_artifact_name: str = ""
+    entry_id: int | None = None
+    inode: int | None = None
+    partition_offset: int | None = None
+    offset_unit: str = "sectors"
+    sha256: str | None = None
+    evidence_id: str = ""
+    extracted_at: str | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["trust"] = TRUST_LABEL
+        return data
+
+
+@dataclass(slots=True)
+class CredentialAnalysisResult:
+    evidence_id: str
+    records: list[CredentialRecord]
+    stores: list[Any]
+    total_records: int
+    browsers_found: list[str]
+    profiles_found: list[str]
+    protection_summary: dict[str, int]
+    warnings: list[str] = field(default_factory=list)
+    note: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trust": TRUST_LABEL,
+            "evidence_id": self.evidence_id,
+            "records": [r.to_dict() for r in self.records],
+            "stores": [s.to_dict() if hasattr(s, "to_dict") else s for s in self.stores],
+            "total_records": self.total_records,
+            "browsers_found": list(self.browsers_found),
+            "profiles_found": list(self.profiles_found),
+            "protection_summary": dict(self.protection_summary),
+            "warnings": list(self.warnings),
+            "note": self.note,
+            "provenance": dict(self.provenance),
+        }
+

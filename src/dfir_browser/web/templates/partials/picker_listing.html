@@ -1,0 +1,68 @@
+{% if error %}
+<div class="picker-error">
+  <p class="badge deleted">Cannot open this folder</p>
+  <p class="small-note">{{ error }}</p>
+  <button type="button" class="tree-btn" data-picker-close>Close</button>
+</div>
+{% else %}
+<div class="picker" data-picker-path="{{ listing.path }}">
+  <div class="picker-head">
+    <strong>Select evidence file</strong>
+    <button type="button" class="link" data-picker-close>Close</button>
+  </div>
+
+  <nav class="picker-breadcrumb small-note" aria-label="Picker path">
+    <button type="button" class="link" data-picker-go="">Allowed roots</button>
+    {% if listing.path %}
+      {% set parts = listing.path.split('/') %}
+      {% for part in parts %}
+        {% if part and not loop.first %}
+        <span aria-hidden="true">›</span>
+        <span>{{ part }}</span>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </nav>
+
+  {% if listing.path and listing.parent %}
+  <button type="button" class="tree-btn" data-picker-go="{{ listing.parent }}">
+    ↑ Parent folder
+  </button>
+  {% endif %}
+
+  {% if listing.entries %}
+  <ul class="picker-list">
+    {% for item in listing.entries %}
+    <li>
+      {% if item.kind == 'directory' %}
+      <button type="button" class="picker-dir" data-picker-go="{{ item.path }}">
+        <span aria-hidden="true">📁</span> {{ item.name }}
+      </button>
+      {% else %}
+      <button type="button" class="picker-file" data-picker-file="{{ item.path }}">
+        <span aria-hidden="true">📄</span> {{ item.name }}
+        <span class="muted small-note">{{ item.size|filesize }}</span>
+      </button>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted small-note">No supported evidence file in this folder.</p>
+  {% endif %}
+
+  {% if listing.truncated %}
+  <p class="badge unalloc">Listing truncated at {{ listing.limit }} entries.</p>
+  {% endif %}
+  {% if listing.warnings %}
+  <ul class="small-note muted">
+    {% for warning in listing.warnings[:5] %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="muted small-note">
+    Only directories and .E01 / .raw / .img / .ad1 files are shown, and only
+    inside the allowed roots. Register the primary .E01 or .ad1 segment; the
+    remaining segments are read automatically.
+  </p>
+</div>
+{% endif %}

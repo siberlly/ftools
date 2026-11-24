@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import codecs
+import time
 import hashlib
 import json
 import logging
@@ -62,12 +63,28 @@ MAGIC_TYPES = (
     (b"\x7fELF", "elf_executable", "application/x-elf"),
     (b"PK\x03\x04", "zip_archive", "application/zip"),
     (b"\xd0\xcf\x11\xe0", "ole_compound", "application/x-ole-storage"),
-    (b"\x89PNG", "png_image", "image/png"),
+    (b"\x89PNG\r\n\x1a\n", "png_image", "image/png"),
     (b"\xff\xd8\xff", "jpeg_image", "image/jpeg"),
+    (b"GIF87a", "gif_image", "image/gif"),
+    (b"GIF89a", "gif_image", "image/gif"),
+    (b"BM", "bmp_image", "image/bmp"),
     (b"%PDF", "pdf_document", "application/pdf"),
     (b"\x1f\x8b", "gzip_archive", "application/gzip"),
     (b"SQLite format 3\x00", "sqlite_database", "application/vnd.sqlite3"),
+    (b"RIFF", "riff_container", "application/x-riff"),
+    (b"II*\x00", "tiff_image", "image/tiff"),
+    (b"MM\x00*", "tiff_image", "image/tiff"),
 )
+
+# Only raster formats the browser renders safely are served as images.
+IMAGE_TYPES = {
+    "png_image": "image/png",
+    "jpeg_image": "image/jpeg",
+    "gif_image": "image/gif",
+    "bmp_image": "image/bmp",
+    "tiff_image": "image/tiff",
+    "webp_image": "image/webp",
+}
 
 KNOWN_HIVE_NAMES = {
     "system", "software", "sam", "security", "default", "ntuser.dat",
@@ -115,6 +132,8 @@ class PreviewResult:
     has_more: bool = False
     sha256: str | None = None
     registry: dict[str, Any] | None = None
+    image: dict[str, Any] | None = None
+    sqlite: dict[str, Any] | None = None
     warnings: list[str] = field(default_factory=list)
     state: str = "ready"
 
@@ -196,6 +215,56 @@ def classify_name(name: str) -> tuple[str, str | None, bool]:
     return "unknown", None, False
 
 
+def image_info(data: bytes) -> dict[str, Any] | None:
+    """Return raster image metadata for an allowlisted format, else None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        width = height = None
+        if len(data) >= 24:
+            width = int.from_bytes(data[16:20], "big")
+            height = int.from_bytes(data[20:24], "big")
+        return {"media_type": "image/png", "format": "png", "width": width, "height": height}
+    if data.startswith(b"\xff\xd8\xff"):
+        width = height = None
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            if marker in (0xD8, 0xD9):
+                index += 2
+                continue
+            length = int.from_bytes(data[index + 2:index + 4], "big")
+            if marker in (
+                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+            ):
+                height = int.from_bytes(data[index + 5:index + 7], "big")
+                width = int.from_bytes(data[index + 7:index + 9], "big")
+                break
+            index += 2 + max(2, length)
+        return {"media_type": "image/jpeg", "format": "jpeg", "width": width, "height": height}
+    if data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
+        return {
+            "media_type": "image/gif",
+            "format": "gif",
+            "width": int.from_bytes(data[6:8], "little"),
+            "height": int.from_bytes(data[8:10], "little"),
+        }
+    if data.startswith(b"BM") and len(data) >= 26:
+        return {
+            "media_type": "image/bmp",
+            "format": "bmp",
+            "width": int.from_bytes(data[18:22], "little", signed=True),
+            "height": int.from_bytes(data[22:26], "little", signed=True),
+        }
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return {"media_type": "image/webp", "format": "webp", "width": None, "height": None}
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return {"media_type": "image/tiff", "format": "tiff", "width": None, "height": None}
+    return None
+
+
 def hexdump(data: bytes, *, base_offset: int = 0, width: int = 16) -> str:
     lines: list[str] = []
     for start in range(0, len(data), width):
@@ -249,6 +318,7 @@ class FilePreviewService:
         evidence,
         indexer: FilesystemIndexer,
         audit,
+        index_store=None,
     ) -> None:
         self.settings = settings
         self.policy = policy
@@ -256,6 +326,7 @@ class FilePreviewService:
         self.evidence = evidence
         self.indexer = indexer
         self.audit = audit
+        self.index_store = index_store
         self._cache: OrderedDict[tuple, PreviewResult] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -466,6 +537,12 @@ class FilePreviewService:
         mode = self.validate_mode(mode)
         start, size = self.validate_range(offset, limit)
         entry = self.resolve_entry(record, entry_id)
+        link_note = None
+        if str(entry.fls_type or "").startswith("l"):
+            target_entry, link_note = self._follow_symlink(record, entry)
+            if target_entry is None:
+                return self._symlink_result(record, entry, link_note, start, size)
+            entry = target_entry
         before = self._cache_fingerprint(record, entry)
         cached = self._cache_get((record.evidence_id, entry.id, before, start, size, mode))
         if cached is not None:
@@ -487,6 +564,7 @@ class FilePreviewService:
             )
         else:
             size_note = None
+        warnings: list[str] = []
 
         with open(copy.path, "rb") as handle:
             header = handle.read(int(self.settings.preview_binary_sample))
@@ -499,10 +577,27 @@ class FilePreviewService:
                 read_limit = min(
                     size, int(self.settings.preview_registry_hex_bytes)
                 )
+            elif effective == "sqlite":
+                read_limit = min(
+                    int(self.settings.preview_binary_sample) * 4, total_size
+                )
+            elif effective == "image":
+                max_image = int(self.settings.preview_max_image_bytes)
+                if total_size > max_image:
+                    effective = "hex"
+                    if start == 0:
+                        start, size = self.validate_range(0, size)
+                    warnings.append(
+                        f"image is {total_size} bytes, above the "
+                        f"{max_image}-byte inline limit; showing hex instead"
+                    )
+                else:
+                    read_limit = total_size
             handle.seek(start)
             data = handle.read(read_limit)
 
-        warnings: list[str] = []
+        if link_note:
+            warnings.append(link_note)
         if copy.note:
             pass  # reuse is normal, not a warning
         if size_note:
@@ -537,6 +632,43 @@ class FilePreviewService:
                 sha256=copy.sha256,
                 warnings=warnings,
             )
+        elif effective == "sqlite":
+            result = self._sqlite_result(
+                record, entry, copy, header_type, total_size
+            )
+            result.warnings = list(dict.fromkeys([*warnings, *result.warnings]))
+        elif effective == "image":
+            info = image_info(data) or {
+                "media_type": "application/octet-stream",
+                "format": "unknown",
+                "width": None,
+                "height": None,
+            }
+            result = PreviewResult(
+                evidence_id=record.evidence_id,
+                entry_id=entry.id,
+                filename=entry.basename,
+                evidence_path=entry.full_path,
+                detected_type=header_type,
+                preview_mode="image",
+                encoding=None,
+                offset=0,
+                returned_bytes=len(data),
+                total_size=total_size,
+                truncated=False,
+                content="",
+                mime_type=info["media_type"],
+                byte_limit=read_limit,
+                sha256=copy.sha256,
+                image={
+                    **info,
+                    "bytes": len(data),
+                    "url": (
+                        f"/evidence/{record.evidence_id}/entries/"
+                        f"{entry.id}/image"
+                    ),
+                },
+            )
         else:
             # Do not end the decoded text in the middle of a UTF-8 sequence.
             final = start + len(data) >= total_size
@@ -547,11 +679,25 @@ class FilePreviewService:
             lines = _split_lines(text)
             max_lines = int(self.settings.preview_text_max_lines)
             truncated = start + len(data) < total_size
+            line_next_offset = None
             if len(lines) > max_lines:
                 lines = lines[:max_lines]
                 truncated = True
                 warnings.append(
                     f"Preview truncated: stopped at {max_lines} lines"
+                )
+                # Continue from the byte right after the last shown line so the
+                # line cap does not block reading the rest of the file.
+                try:
+                    consumed = len(
+                        "\n".join(lines).encode(encoding, errors="ignore")
+                    )
+                    newline_bytes = len("\n".encode(encoding))
+                except (LookupError, UnicodeError):
+                    consumed = len("\n".join(lines).encode("utf-8"))
+                    newline_bytes = 1
+                line_next_offset = min(
+                    total_size, start + consumed + newline_bytes
                 )
             if truncated and (start + len(data) < total_size):
                 warnings.append(
@@ -578,8 +724,13 @@ class FilePreviewService:
                 sha256=copy.sha256,
                 warnings=list(dict.fromkeys(warnings)),
             )
+        if "line_next_offset" in locals() and line_next_offset is not None:
+            if line_next_offset > result.offset and line_next_offset < total_size:
+                result.next_offset = line_next_offset
+                result.has_more = True
         if result.offset + result.returned_bytes < total_size:
-            result.next_offset = result.offset + result.returned_bytes
+            if result.next_offset is None:
+                result.next_offset = result.offset + result.returned_bytes
             result.has_more = True
         if result.offset > 0:
             result.warnings = list(
@@ -614,6 +765,368 @@ class FilePreviewService:
         )
         return result
 
+    def _follow_symlink(self, record, entry):
+        from .symlink import resolve_target
+
+        return resolve_target(
+            record, entry, filesystem=self.filesystem, index_store=self.index_store
+        )
+
+    def _symlink_result(
+        self, record, entry, note: str, start: int, size: int
+    ) -> PreviewResult:
+        return PreviewResult(
+            evidence_id=record.evidence_id,
+            entry_id=entry.id,
+            filename=entry.basename,
+            evidence_path=entry.full_path,
+            detected_type="symbolic_link",
+            preview_mode="symlink",
+            encoding=None,
+            offset=0,
+            returned_bytes=0,
+            total_size=int(entry.size or 0),
+            truncated=False,
+            content="",
+            mime_type="inode/symlink",
+            warnings=[note],
+            state="partial",
+        )
+
+    def _sqlite_connect(self, path):
+        import sqlite3
+
+        connection = sqlite3.connect(
+            f"file:{path}?mode=ro&immutable=1", uri=True, timeout=5.0
+        )
+        connection.row_factory = None
+        connection.execute("PRAGMA query_only = 1")
+        return connection
+
+    def _sqlite_result(
+        self, record, entry, copy, header_type: str, total_size: int
+    ) -> PreviewResult:
+        warnings: list[str] = []
+        info: dict[str, Any] = {
+            "tables": [],
+            "table_count": 0,
+            "page_size": None,
+            "encoding": None,
+            "user_version": None,
+            "journal_mode": None,
+            "truncated": False,
+        }
+        try:
+            connection = self._sqlite_connect(copy.path)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"SQLite database could not be opened read-only: {exc}")
+            connection = None
+        if connection is not None:
+            try:
+                for pragma, key in (
+                    ("page_size", "page_size"),
+                    ("encoding", "encoding"),
+                    ("user_version", "user_version"),
+                    ("journal_mode", "journal_mode"),
+                ):
+                    try:
+                        row = connection.execute(f"PRAGMA {pragma}").fetchone()
+                        info[key] = row[0] if row else None
+                    except Exception:  # noqa: BLE001
+                        pass
+                max_tables = int(self.settings.preview_sqlite_max_tables)
+                rows = connection.execute(
+                    "SELECT name, type FROM sqlite_master "
+                    "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY name LIMIT ?",
+                    (max_tables + 1,),
+                ).fetchall()
+                if len(rows) > max_tables:
+                    info["truncated"] = True
+                    warnings.append(
+                        f"only the first {max_tables} tables are listed"
+                    )
+                for name, kind in rows[:max_tables]:
+                    entry_info: dict[str, Any] = {
+                        "name": str(name),
+                        "type": str(kind),
+                        "columns": [],
+                        "row_estimate": None,
+                        "error": None,
+                    }
+                    try:
+                        quoted = '"' + str(name).replace('"', '""') + '"'
+                        cols = connection.execute(
+                            f"PRAGMA table_info({quoted})"
+                        ).fetchall()
+                        entry_info["columns"] = [
+                            {
+                                "name": str(col[1]),
+                                "type": str(col[2] or ""),
+                                "not_null": bool(col[3]),
+                                "primary_key": bool(col[5]),
+                            }
+                            for col in cols[: int(self.settings.preview_sqlite_max_columns)]
+                        ]
+                        if kind == "table":
+                            count = connection.execute(
+                                f"SELECT COUNT(*) FROM (SELECT 1 FROM {quoted} LIMIT 1001)"
+                            ).fetchone()
+                            entry_info["row_estimate"] = int(count[0]) if count else 0
+                    except Exception as exc:  # noqa: BLE001
+                        entry_info["error"] = str(exc)[:200]
+                    info["tables"].append(entry_info)
+                info["table_count"] = len(info["tables"])
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"SQLite schema could not be read: {exc}")
+            finally:
+                connection.close()
+        return PreviewResult(
+            evidence_id=record.evidence_id,
+            entry_id=entry.id,
+            filename=entry.basename,
+            evidence_path=entry.full_path,
+            detected_type=header_type,
+            preview_mode="sqlite",
+            encoding=None,
+            offset=0,
+            returned_bytes=0,
+            total_size=total_size,
+            truncated=False,
+            content="",
+            mime_type="application/vnd.sqlite3",
+            sha256=copy.sha256,
+            sqlite=info,
+            warnings=warnings,
+        )
+
+    def sqlite_rows(
+        self,
+        record,
+        entry_id: Any,
+        table: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Bounded, read-only rows from one table of an evidence SQLite file."""
+        entry = self.resolve_entry(record, entry_id)
+        if str(entry.fls_type or "").startswith("l"):
+            target_entry, note = self._follow_symlink(record, entry)
+            if target_entry is None:
+                raise PreviewRejected(
+                    note or "symbolic link target is unavailable",
+                    code="preview_symlink_unresolved",
+                )
+            entry = target_entry
+        copy = self._ensure_copy(record, entry)
+        try:
+            start = max(0, int(offset))
+        except (TypeError, ValueError):
+            raise PreviewRejected(
+                "offset must be an integer", code="preview_invalid_offset"
+            )
+        max_rows = int(self.settings.preview_sqlite_max_rows)
+        try:
+            size = int(limit) if limit else int(self.settings.preview_sqlite_default_rows)
+        except (TypeError, ValueError):
+            size = max_rows
+        size = max(1, min(size, max_rows))
+        try:
+            connection = self._sqlite_connect(copy.path)
+        except Exception as exc:  # noqa: BLE001
+            raise PreviewRejected(
+                f"SQLite database could not be opened: {exc}",
+                code="preview_sqlite_unreadable",
+            ) from exc
+        deadline = time.monotonic() + float(self.settings.preview_sqlite_timeout)
+        try:
+            known = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+                )
+            }
+            if table not in known:
+                raise PreviewRejected(
+                    "unknown table", code="preview_sqlite_unknown_table"
+                )
+            quoted = '"' + table.replace('"', '""') + '"'
+            connection.set_progress_handler(
+                lambda: 1 if time.monotonic() > deadline else 0, 10_000
+            )
+            cursor = connection.execute(
+                f"SELECT * FROM {quoted} LIMIT ? OFFSET ?", (size, start)
+            )
+            columns = [desc[0] for desc in cursor.description or []]
+            cell_chars = int(self.settings.preview_sqlite_cell_chars)
+            full_chars = int(self.settings.preview_sqlite_cell_full_chars)
+            rows = []
+            for row in cursor.fetchall():
+                rendered = []
+                for value in row:
+                    if value is None:
+                        rendered.append({"kind": "null", "text": "NULL"})
+                    elif isinstance(value, bytes):
+                        blob_hex = value[:64].hex()
+                        rendered.append(
+                            {
+                                "kind": "blob",
+                                "text": value[:32].hex(),
+                                "length": len(value),
+                                "full": blob_hex,
+                                "full_truncated": len(value) > 64,
+                            }
+                        )
+                    elif isinstance(value, (int, float)):
+                        rendered.append(
+                            {"kind": "number", "text": str(value), "length": None}
+                        )
+                    else:
+                        text = str(value)
+                        entry_cell = {
+                            "kind": "text",
+                            "text": text[:cell_chars],
+                            "length": len(text),
+                            "full": None,
+                            "full_truncated": False,
+                        }
+                        if len(text) > cell_chars:
+                            entry_cell["full"] = text[:full_chars]
+                            entry_cell["full_truncated"] = len(text) > full_chars
+                            entry_cell["preview"] = text[:2000]
+                        rendered.append(entry_cell)
+                rows.append(rendered)
+        except PreviewRejected:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise PreviewRejected(
+                f"SQLite query failed: {exc}",
+                code="preview_sqlite_query_failed",
+            ) from exc
+        finally:
+            try:
+                connection.set_progress_handler(None, 0)
+            except Exception:  # noqa: BLE001
+                pass
+            connection.close()
+        self.audit.event(
+            "file_preview_sqlite",
+            evidence_id=record.evidence_id,
+            request_id=get_correlation_id(),
+            details={
+                "entry_id": entry.id,
+                "table": table,
+                "offset": start,
+                "limit": size,
+                "rows": len(rows),
+            },
+        )
+        return {
+            "trust": TRUST_LABEL,
+            "entry_id": entry.id,
+            "table": table,
+            "columns": columns,
+            "rows": rows,
+            "offset": start,
+            "limit": size,
+            "returned": len(rows),
+            "has_more": len(rows) == size,
+        }
+
+    def download_copy(self, record, entry_id: Any) -> tuple[Path, str, int]:
+        """Validated working copy for an explicit analyst download.
+
+        Bounded by ``preview_max_download_bytes``; nothing is written outside
+        the case export directory and the path is never caller-controlled.
+        """
+        entry = self.resolve_entry(record, entry_id)
+        if str(entry.fls_type or "").startswith("l"):
+            target_entry, note = self._follow_symlink(record, entry)
+            if target_entry is None:
+                raise PreviewRejected(
+                    note or "symbolic link target is unavailable",
+                    code="preview_symlink_unresolved",
+                )
+            entry = target_entry
+        copy = self._ensure_copy(record, entry)
+        try:
+            size = copy.path.stat().st_size
+        except OSError as exc:
+            raise PreviewRejected(
+                "extracted copy is not readable",
+                code="preview_extract_unreadable",
+                details={"error": str(exc)},
+            ) from exc
+        limit = int(self.settings.preview_max_download_bytes)
+        if size > limit:
+            raise PreviewRejected(
+                "extracted copy exceeds the download limit",
+                code="preview_download_too_large",
+                details={"size": size, "limit": limit},
+            )
+        name = entry.basename or f"entry_{entry.id}.bin"
+        self.audit.event(
+            "file_download",
+            evidence_id=record.evidence_id,
+            request_id=get_correlation_id(),
+            details={"entry_id": entry.id, "inode": entry.inode, "bytes": size},
+        )
+        return copy.path, name, size
+
+    def image_bytes(self, record, entry_id: Any) -> tuple[dict[str, Any], bytes]:
+        """Raw bytes of an allowlisted raster image, for inline display.
+
+        Only formats the browser renders safely are served; SVG and other
+        markup-capable formats stay in the text/hex view. The size cap prevents
+        a huge file from being streamed to the browser.
+        """
+        entry = self.resolve_entry(record, entry_id)
+        if str(entry.fls_type or "").startswith("l"):
+            target_entry, note = self._follow_symlink(record, entry)
+            if target_entry is None:
+                raise PreviewRejected(
+                    note or "symbolic link target is unavailable",
+                    code="preview_symlink_unresolved",
+                )
+            entry = target_entry
+        copy = self._ensure_copy(record, entry)
+        try:
+            size = copy.path.stat().st_size
+        except OSError as exc:
+            raise PreviewRejected(
+                "extracted copy is not readable",
+                code="preview_extract_unreadable",
+                details={"error": str(exc)},
+            ) from exc
+        limit = int(self.settings.preview_max_image_bytes)
+        if size > limit:
+            raise PreviewRejected(
+                "image exceeds the inline preview limit",
+                code="preview_image_too_large",
+                details={"size": size, "limit": limit},
+            )
+        with open(copy.path, "rb") as handle:
+            data = handle.read(limit + 1)
+        info = image_info(data)
+        if info is None:
+            raise PreviewRejected(
+                "entry is not a supported raster image",
+                code="preview_not_an_image",
+            )
+        self.audit.event(
+            "file_preview_image",
+            evidence_id=record.evidence_id,
+            request_id=get_correlation_id(),
+            details={
+                "entry_id": entry.id,
+                "inode": entry.inode,
+                "media_type": info["media_type"],
+                "bytes": len(data),
+            },
+        )
+        return info, data
+
     def _effective_mode(self, requested: str, header_type: str) -> str:
         if requested == "hex":
             return "hex"
@@ -621,6 +1134,10 @@ class FilePreviewService:
             return "registry"
         if requested == "text":
             return "text"
+        if header_type in IMAGE_TYPES:
+            return "image"
+        if header_type == "sqlite_database":
+            return "sqlite"
         return "text" if header_type in {"text", "unknown"} else "hex"
 
     def _classify(self, entry, header: bytes) -> tuple[str, str | None]:

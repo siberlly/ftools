@@ -20,7 +20,7 @@ from .errors import DFIRError
 from .filesystem import FilesystemError, FilesystemService, detect_layout
 from .hashing import HashTimeout, sha256_file
 from .models import EvidenceRecord, Layout, TRUST_LABEL, utc_now_iso
-from .parsers import parse_ewfinfo, parse_fsstat, parse_img_stat
+from .parsers import parse_ewfinfo, parse_fsstat, parse_img_stat, parse_mmls
 from .policy import SecurityPolicy
 
 REGISTRY_SCHEMA_VERSION = 2
@@ -286,17 +286,44 @@ class ImageProvider:
             evidence_id=evidence_id,
         )
         fs_info = parse_fsstat(fs_result.stdout) if fs_result.ok else {}
-        if not fs_result.ok or not fs_info.get("filesystem"):
-            raise EvidenceAccessError(
-                "fsstat could not identify a filesystem on the raw exposure",
-                code="exposure_fsstat_failed",
-                details={
-                    "path": str(resolved),
-                    "exit_code": fs_result.exit_code,
-                    "timed_out": fs_result.timed_out,
-                },
-            )
         details["fsstat"] = fs_info
+        if not fs_result.ok or not fs_info.get("filesystem"):
+            # A whole-disk image (GPT/MBR) has a partition table at sector 0,
+            # so fsstat finds no filesystem there. That is not corruption:
+            # accept the exposure when a partition table exists and let the
+            # layout detector pick the data partition.
+            mmls_result = self.runner.run(
+                ["mmls", str(resolved)],
+                timeout=self.runner.timeout,
+                evidence_id=evidence_id,
+            )
+            slots: list[dict[str, Any]] = []
+            if mmls_result.ok and (mmls_result.stdout or "").strip():
+                try:
+                    slots = parse_mmls(mmls_result.stdout).get("data_slots", [])
+                except Exception:  # noqa: BLE001 - parsing is best effort
+                    slots = []
+            if not slots:
+                raise EvidenceAccessError(
+                    "fsstat could not identify a filesystem on the raw exposure "
+                    "and no partition table was found",
+                    code="exposure_fsstat_failed",
+                    details={
+                        "path": str(resolved),
+                        "exit_code": fs_result.exit_code,
+                        "timed_out": fs_result.timed_out,
+                    },
+                )
+            details["partition_table"] = {
+                "slots": len(slots),
+                "first_start_sectors": slots[0]["start_sectors"],
+                "first_description": slots[0].get("description"),
+            }
+            warnings.append(
+                "whole-disk image: no filesystem at sector 0; a partition table "
+                f"with {len(slots)} data partition(s) was found, so the layout "
+                "detector will select the data partition"
+            )
 
         if shutil.which("img_stat"):
             img_result = self.runner.run(
@@ -370,10 +397,33 @@ class ImageProvider:
             details=details,
         )
 
+    @staticmethod
+    def _marker_path(mount_dir: Path) -> Path:
+        """Managed-mount marker lives beside the mount point, never inside it.
+
+        ``ewfmount`` exposes a read-only FUSE filesystem, so creating a file
+        inside the mount directory fails with ENOSYS. The marker is therefore a
+        sibling file in the mounts root.
+        """
+        return mount_dir.parent / f"{mount_dir.name}.managed.json"
+
+    @staticmethod
+    def _legacy_marker_path(mount_dir: Path) -> Path:
+        return mount_dir / ".dfir-managed.json"
+
+    def _read_marker(self, mount_dir: Path) -> Path | None:
+        marker = self._marker_path(mount_dir)
+        if marker.is_file():
+            return marker
+        legacy = self._legacy_marker_path(mount_dir)
+        if legacy.is_file():
+            return legacy
+        return None
+
     def _write_marker(self, mount_dir: Path, payload: dict[str, Any]) -> None:
-        marker = mount_dir / ".dfir-managed.json"
+        marker = self._marker_path(mount_dir)
         descriptor, temporary = tempfile.mkstemp(
-            prefix=".dfir-managed.", suffix=".tmp", dir=str(mount_dir)
+            prefix=f".{mount_dir.name}.", suffix=".tmp", dir=str(mount_dir.parent)
         )
         try:
             os.fchmod(descriptor, 0o600)
@@ -409,7 +459,7 @@ class ImageProvider:
                 details={"mount_dir": str(mount_dir)},
             )
 
-        marker = mount_dir / ".dfir-managed.json"
+        marker = self._read_marker(mount_dir)
         if mount_dir.exists():
             if mount_dir.is_symlink() or not mount_dir.is_dir():
                 raise EvidenceAccessError(
@@ -417,7 +467,7 @@ class ImageProvider:
                     code="managed_mount_invalid",
                     details={"mount_dir": str(mount_dir)},
                 )
-            if not marker.is_file():
+            if marker is None or not marker.is_file():
                 raise EvidenceAccessError(
                     "mount directory exists but was not created by this application",
                     code="managed_mount_unowned",
@@ -442,25 +492,31 @@ class ImageProvider:
                     details={"mount_dir": str(mount_dir)},
                 )
             exposure = mount_dir / "ewf1"
-            if not exposure.is_file():
-                raise EvidenceAccessError(
-                    "managed mount marker exists but ewf1 is missing",
-                    code="managed_mount_missing_exposure",
-                    details={"mount_dir": str(mount_dir)},
+            if exposure.is_file():
+                warnings, details = self.verify_exposure(
+                    exposure, media_size, evidence_id
                 )
-            warnings, details = self.verify_exposure(
-                exposure, media_size, evidence_id
+                warnings.insert(
+                    0, f"reusing existing managed EWF exposure {details['path']}"
+                )
+                return ExposureResolution(
+                    path=Path(details["path"]),
+                    mode="managed",
+                    verified_at=utc_now_iso(),
+                    warnings=warnings,
+                    details=details,
+                )
+            # Stale mount directory (for example after an unclean stop): drop
+            # it and mount again below instead of failing.
+            self._logger.warning(
+                "managed mount %s has no ewf1; re-creating it", mount_dir
             )
-            warnings.insert(
-                0, f"reusing existing managed EWF exposure {details['path']}"
-            )
-            return ExposureResolution(
-                path=Path(details["path"]),
-                mode="managed",
-                verified_at=utc_now_iso(),
-                warnings=warnings,
-                details=details,
-            )
+            self._unmount_dir(mount_dir, evidence_id)
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+            self._remove_empty_dir(mount_dir)
 
         mount_dir.mkdir(parents=True, mode=0o700)
         if mount_dir.is_symlink():
@@ -608,8 +664,8 @@ class ImageProvider:
             try:
                 if not mount_dir.exists():
                     continue
-                marker = mount_dir / ".dfir-managed.json"
-                if not marker.is_file():
+                marker = self._read_marker(mount_dir)
+                if marker is None or not marker.is_file():
                     self._logger.warning(
                         "not unmounting %s: managed marker missing", mount_dir
                     )
@@ -901,6 +957,46 @@ class EvidenceService:
     def list(self) -> list[EvidenceRecord]:
         return [EvidenceRecord.from_dict(item) for item in self.registry.list_all()]
 
+    def _reresolve_exposure(
+        self, record: EvidenceRecord, source: Path
+    ) -> Path | None:
+        """Re-create a missing managed/explicit exposure from the source.
+
+        Returns the verified exposure path, or None when the exposure cannot be
+        re-created safely (automount disabled, mapping gone, verification
+        fails). The evidence record is updated when re-resolution succeeds.
+        """
+        if record.exposure_mode not in {"managed", "explicit"}:
+            return None
+        if not record.source_sha256:
+            return None
+        try:
+            resolution = self.provider.resolve(
+                source,
+                int(record.media_size),
+                record.evidence_id,
+                record.source_sha256,
+            )
+            rebuilt = Path(resolution.path).resolve(strict=True)
+        except (DFIRError, OSError) as exc:
+            self._logger.warning(
+                "could not re-create the exposure for %s: %s",
+                record.evidence_id,
+                exc,
+            )
+            return None
+        record.raw_exposure_path = str(rebuilt)
+        record.exposure_mode = resolution.mode
+        record.exposure_verified_at = resolution.verified_at
+        try:
+            self.registry.upsert(record.to_dict())
+        except Exception:  # noqa: BLE001 - persistence is best effort
+            self._logger.warning(
+                "could not persist the re-created exposure for %s",
+                record.evidence_id,
+            )
+        return rebuilt
+
     def ensure_image(self, record: EvidenceRecord) -> Path:
         if record.exposure_mode == "legacy" or not record.source_sha256:
             raise EvidenceAccessError(
@@ -977,11 +1073,18 @@ class EvidenceService:
         try:
             exposure = Path(record.raw_exposure_path).resolve(strict=True)
         except FileNotFoundError as exc:
-            raise EvidenceAccessError(
-                "recorded raw exposure no longer exists",
-                code="exposure_missing",
-                details={"path": record.raw_exposure_path},
-            ) from exc
+            # A managed ewfmount exposure disappears when the process that
+            # created it exits (or the mount is unmounted). Re-resolve it from
+            # the source instead of failing the whole evidence.
+            rebuilt = self._reresolve_exposure(record, source)
+            if rebuilt is None:
+                raise EvidenceAccessError(
+                    "recorded raw exposure no longer exists and could not be "
+                    "re-created; rebuild the evidence exposure",
+                    code="exposure_missing",
+                    details={"path": record.raw_exposure_path},
+                ) from exc
+            exposure = rebuilt
         except OSError as exc:
             raise EvidenceAccessError(
                 f"cannot resolve raw exposure: {exc}",

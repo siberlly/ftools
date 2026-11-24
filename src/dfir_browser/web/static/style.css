@@ -1025,3 +1025,115 @@ button.secondary:hover { background: #e2eaf3; border-color: #b9c9db; }
     flex: 1 1 auto; min-width: 0;
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* recycle bin metadata                                             */
+/* ---------------------------------------------------------------- */
+.recycle-card { min-width: 0; max-width: 100%; }
+.recycle-card .file-facts dd { overflow-wrap: anywhere; }
+.recycle-card code { overflow-wrap: anywhere; }
+.recycle-card .entry-actions { flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+
+/* ---------------------------------------------------------------- */
+/* ShellBags explorer                                               */
+/* ---------------------------------------------------------------- */
+.shellbags-view { min-width: 0; }
+.shellbags-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.shellbags-toolbar form { margin: 0; }
+.shellbags-layout {
+  display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(240px, 340px);
+  gap: 12px; align-items: start; min-width: 0;
+}
+.shellbags-side, .shellbags-main, .shellbags-detail { min-width: 0; }
+.shellbags-side h3, .shellbags-main h3 { margin: 8px 0; }
+.shellbags-device-list { list-style: none; padding: 0; margin: 0 0 12px; }
+.shellbags-device-list li { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+.shellbags-device-detail { overflow-wrap: anywhere; }
+.shellbags-hives { padding-left: 16px; }
+.shellbags-tree-table td.name { overflow-wrap: anywhere; }
+.shellbags-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; }
+.shellbags-results { margin-top: 10px; }
+.shellbags-detail { border-left: 1px solid var(--line); padding-left: 12px; }
+.shellbags-detail .file-facts dd { overflow-wrap: anywhere; }
+.shellbags-search { flex-wrap: wrap; }
+.shellbags-search label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.shellbags-search input, .shellbags-search select { min-width: 120px; max-width: 100%; }
+@media (max-width: 1200px) {
+  .shellbags-layout { grid-template-columns: minmax(0, 1fr); }
+  .shellbags-detail { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 700px) {
+  .shellbags-search label { flex: 1 1 100%; }
+  .shellbags-search input, .shellbags-search select { width: 100%; min-width: 0; }
+  .shellbags-tree-table { font-size: 11.5px; }
+}
+
+/* ---------------------------------------------------------------- */
+/* evidence file picker                                             */
+/* ---------------------------------------------------------------- */
+.picker-dialog {
+  width: min(720px, 92vw); max-height: 80vh; padding: 0; border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 24px 60px rgba(16, 24, 40, .22);
+  background: var(--surface, #fff); color: inherit; overflow: hidden;
+}
+.picker-dialog::backdrop { background: rgba(16, 24, 40, .45); }
+.picker { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; max-height: 80vh; overflow: auto; }
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.picker-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; overflow-wrap: anywhere; }
+.picker-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.picker-list li { border-bottom: 1px solid var(--line); }
+.picker-dir, .picker-file {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 8px 6px; background: transparent; border: 0; cursor: pointer;
+  font: inherit; color: inherit; overflow-wrap: anywhere;
+}
+.picker-dir:hover, .picker-file:hover, .picker-dir:focus-visible, .picker-file:focus-visible {
+  background: var(--surface-alt, #f2f5f8);
+}
+.picker-dir span[aria-hidden], .picker-file span[aria-hidden] { flex: 0 0 auto; }
+.picker-error { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 700px) {
+  .picker-dialog { width: 96vw; max-height: 88vh; }
+  .picker { padding: 10px; }
+}
+
+/* ---------------------------------------------------------------- */
+/* image preview                                                    */
+/* ---------------------------------------------------------------- */
+.preview-image { margin: 8px 0; min-width: 0; }
+.preview-image img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: #f7f9fb;
+}
+.preview-image figcaption { margin-top: 6px; overflow-wrap: anywhere; }
+
+/* Tabs must wrap (not widen the page) on narrow screens. */
+@media (max-width: 700px) {
+  .tabs { flex-wrap: wrap; overflow-x: visible; }
+}
+
+/* ---------------------------------------------------------------- */
+/* sqlite preview                                                   */
+/* ---------------------------------------------------------------- */
+.preview-sqlite-rows { margin-top: 10px; min-width: 0; }
+.preview-sqlite-wrap { max-height: 50vh; overflow: auto; }
+.preview-sqlite-wrap td { overflow-wrap: anywhere; max-width: 260px; }
+
+/* ---------------------------------------------------------------- */
+/* sqlite rows: column hiding and inline cell expansion             */
+/* ---------------------------------------------------------------- */
+.sqlite-row-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  justify-content: space-between; margin: 6px 0;
+}
+.sqlite-row-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.preview-sqlite-table .sqlite-extra-col { display: none; }
+.preview-sqlite-table.show-all-columns .sqlite-extra-col { display: table-cell; }
+.cell-expand summary {
+  cursor: pointer; color: var(--link, #1a5fb4); overflow-wrap: anywhere;
+}
+.cell-expand .cell-full {
+  margin-top: 4px; padding: 4px 6px; max-height: 16rem; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-subtle, #f5f7fa);
+  border: 1px solid var(--line); border-radius: 6px; font-size: 11.5px;
+}

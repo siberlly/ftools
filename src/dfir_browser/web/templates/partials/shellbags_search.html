@@ -1,0 +1,28 @@
+{% if error %}<p class="badge deleted">{{ error }}</p>{% endif %}
+{% if result %}
+<p class="small-note muted">
+  {{ result.total }} match(es) · page {{ result.page }} of {{ result.pages or 1 }}
+</p>
+{% if result["items"] %}
+<div class="table-wrap">
+  <table class="listing compact">
+    <thead><tr><th>Path</th><th>Kind</th><th>Last write (UTC)</th><th>User</th><th></th></tr></thead>
+    <tbody>
+      {% for item in result["items"] %}
+      <tr>
+        <td class="name"><code>{{ item.path or item.name or "(unnamed)" }}</code></td>
+        <td class="small-note">{{ item.type_name }}{% if item.is_device %} · device{% endif %}</td>
+        <td class="nowrap small-note">{{ item.key_last_write_utc or "" }}</td>
+        <td class="small-note">{{ item.user_sid or "" }}</td>
+        <td><button type="button" class="link"
+                    hx-get="/shellbags/nodes/{{ item.node_id }}"
+                    hx-target="#shellbags-detail" hx-swap="innerHTML">Inspect</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No ShellBags match these filters.</p>
+{% endif %}
+{% endif %}

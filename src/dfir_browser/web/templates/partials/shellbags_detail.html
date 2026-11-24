@@ -1,0 +1,96 @@
+<div class="detail-panel shellbags-detail-panel" data-shellbag-node="{{ node.node_id }}">
+  <div class="detail-head">
+    <h3>{{ node.name or "(unnamed)" }}</h3>
+    <span class="badge kind">{{ node.type_name }}</span>
+    {% if node.is_device %}<span class="badge ok">device</span>{% endif %}
+  </div>
+
+  {% if node.breadcrumb and node.breadcrumb|length > 1 %}
+  <nav class="shellbags-breadcrumb small-note" aria-label="Shellbag detail path">
+    {% for crumb in node.breadcrumb %}
+      {% if not loop.last %}<span>{{ crumb.name or "(unnamed)" }}</span><span aria-hidden="true">›</span>{% endif %}
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  <dl class="file-facts">
+    <dt>Full path</dt><dd><code>{{ node.path or "not recorded" }}</code></dd>
+    {% if node.device_path %}<dt>Device path</dt><dd><code>{{ node.device_path }}</code></dd>{% endif %}
+    {% if node.drive %}<dt>Drive</dt><dd>{{ node.drive }}</dd>{% endif %}
+    {% if node.volume_label %}<dt>Volume label</dt><dd>{{ node.volume_label }}</dd>{% endif %}
+    {% if node.guid %}<dt>Item GUID</dt><dd><code>{{ node.guid }}</code></dd>{% endif %}
+    {% if node.size_bytes %}<dt>Item size</dt><dd>{{ node.size_bytes }} bytes</dd>{% endif %}
+    <dt>User SID</dt><dd><code>{{ node.user_sid or "unknown" }}</code></dd>
+    <dt>BagMRU last write</dt>
+    <dd>
+      {{ node.key_last_write_utc or "not recorded" }}
+      <div class="muted small-note">
+        Registry key write time: when this shellbag entry was last updated.
+      </div>
+    </dd>
+    <dt>Item type</dt><dd>0x{{ "%02x"|format(node.item_type) }} · {{ node.type_name }}</dd>
+    <dt>Name source</dt>
+    <dd>
+      {% if node.name_source == 'utf16' %}
+      decoded from embedded UTF-16 data
+      {% elif node.name_source %}
+      {{ node.name_source }}
+      {% else %}
+      not decoded{% endif %}
+    </dd>
+    {% if node.mru_rank is not none %}<dt>MRU rank</dt><dd>{{ node.mru_rank }}</dd>{% endif %}
+  </dl>
+
+  {% if node.embedded_timestamps %}
+  <h4>Embedded item timestamps</h4>
+  <ul class="small-note">
+    {% for stamp in node.embedded_timestamps %}<li>{{ stamp }}</li>{% endfor %}
+  </ul>
+  <p class="muted small-note">
+    Stored inside the shell item itself. Ordering and meaning vary between
+    Windows versions; treat them as supporting detail, not as the access time.
+  </p>
+  {% endif %}
+
+  <h4>Registry source</h4>
+  <dl class="file-facts">
+    <dt>Hive</dt><dd><code>{{ node.hive_id }}</code></dd>
+    <dt>Key</dt><dd><code>{{ node.registry_key_path }}</code></dd>
+    <dt>Value</dt><dd><code>{{ node.registry_value_name }}</code></dd>
+    {% if node.registry %}
+    <dt>Registry index</dt>
+    <dd>
+      {% if node.registry.key_id %}
+      <button type="button" class="link"
+              hx-get="/registry/hives/{{ node.registry.hive_id }}/key/{{ node.registry.key_id }}"
+              hx-target="#tab-content" hx-swap="innerHTML"
+              data-shellbag-open-registry="{{ node.registry.hive_id }}">
+        Open BagMRU key in Registry Explorer
+      </button>
+      {% else %}
+      <span class="muted">key is not in the registry index (hive not parsed)</span>
+      {% endif %}
+    </dd>
+    {% endif %}
+  </dl>
+
+  <div class="entry-actions">
+    <button type="button" class="tree-btn"
+            data-shellbag-copy-path="{{ node.path or '' }}">Copy path</button>
+    <a class="tree-btn"
+       href="/evidence/{{ node.evidence_id }}/shellbags/export?format=json&q={{ (node.name or '')|urlencode }}">
+      Export match
+    </a>
+  </div>
+
+  {% if node.warnings %}
+  <div class="alert warn small-note">
+    <strong>Notes</strong>
+    <ul>{% for warning in node.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  <p class="muted small-note">
+    ShellBags show that a folder or device was viewed in Explorer. They do not
+    prove any file operation.
+  </p>
+</div>

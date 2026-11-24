@@ -212,6 +212,11 @@ def test_parse_errors_are_stored(tmp_path: Path) -> None:
     assert store.count_parse_errors(EV, status.scan_id) == 1
     errors = store.list_parse_errors(EV, status.scan_id)
     assert "not a valid fls line" in errors[0]["raw_line"]
+    # The warning must state the exact count, not a vague "may be missing".
+    assert status.warning is not None
+    assert "1 of" in status.warning
+    assert "entries could not be parsed" in status.warning
+    assert "%" in status.warning
     indexer.cancel_all()
 
 

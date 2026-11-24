@@ -1,5 +1,6 @@
 {% set pv = preview %}
 <div class="preview-wrap"
+     data-preview-evidence="{{ evidence_id }}"
      data-preview-entry="{{ entry_id }}"
      data-preview-mode="{{ mode }}"
      data-preview-offset="{{ render_offset }}"
@@ -13,6 +14,8 @@
       {{ "truncated" if pv.truncated else "ready" }}
     </span>
     <span class="badge kind">{{ pv.preview_mode }}</span>
+    {% if pv.mime_type == 'inode/symlink' %}<span class="badge unalloc">symlink</span>{% endif %}
+    {% if pv.mime_type == 'inode/symlink' %}<span class="badge unalloc">symlink</span>{% endif %}
     {% if pv.encoding %}<span class="badge kind">{{ pv.encoding }}</span>{% endif %}
     {% endif %}
   </div>
@@ -135,7 +138,62 @@
     <span class="muted small-note" data-preview-match-count></span>
   </div>
 
-  {% if pv.preview_mode == 'text' %}
+  {% if pv.preview_mode == 'sqlite' and pv.sqlite %}
+  <dl class="file-facts">
+    <dt>SQLite</dt>
+    <dd>
+      {{ pv.sqlite.table_count }} table(s)/view(s)
+      · page size {{ pv.sqlite.page_size or "?" }}
+      · encoding {{ pv.sqlite.encoding or "?" }}
+      · user_version {{ pv.sqlite.user_version if pv.sqlite.user_version is not none else "?" }}
+      · journal {{ pv.sqlite.journal_mode or "?" }}
+    </dd>
+  </dl>
+  {% if pv.sqlite.tables %}
+  <div class="table-wrap">
+    <table class="listing compact">
+      <thead><tr><th>Table</th><th>Kind</th><th class="num">Rows</th><th>Columns</th><th></th></tr></thead>
+      <tbody>
+        {% for table in pv.sqlite.tables %}
+        <tr>
+          <td class="name"><code>{{ table.name }}</code></td>
+          <td class="small-note">{{ table.type }}</td>
+          <td class="num">{{ table.row_estimate if table.row_estimate is not none else "" }}{% if table.row_estimate == 1001 %}+{% endif %}</td>
+          <td class="small-note">
+            {% for column in table.columns %}{{ column.name }}{% if column.primary_key %}*{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+            {% if table.error %}<span class="badge deleted">{{ table.error }}</span>{% endif %}
+          </td>
+          <td><button type="button" class="link"
+                      data-sqlite-table="{{ table.name }}">Show rows</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small-note">
+    Read-only: opened with <code>mode=ro&amp;immutable=1</code> and
+    <code>PRAGMA query_only</code>. Row counts are capped at 1000. Untrusted
+    evidence data.
+  </p>
+  {% else %}
+  <p class="muted small-note">This SQLite file has no user tables.</p>
+  {% endif %}
+  <div id="preview-sqlite-rows" class="preview-sqlite-rows" aria-live="polite"></div>
+  {% elif pv.preview_mode == 'image' and pv.image %}
+  <figure class="preview-image">
+    <img src="{{ pv.image.url }}" alt="Evidence image: {{ pv.filename }}"
+         loading="lazy" referrerpolicy="no-referrer">
+    <figcaption class="small-note muted">
+      {{ pv.detected_type }} &middot; {{ pv.image.width or "?" }}×{{ pv.image.height or "?" }} px
+      &middot; {{ pv.image.bytes }} bytes &middot; sha256 {{ (pv.sha256 or "")[:16] }}…
+    </figcaption>
+  </figure>
+  <p class="muted small-note">
+    The image is served from the extracted copy with
+    <code>X-Content-Type-Options: nosniff</code> and a sandbox CSP. SVG and other
+    markup formats are never rendered as images. Untrusted evidence.
+  </p>
+  {% elif pv.preview_mode == 'text' %}
   <div class="preview-scroll">
     <div class="preview-gutter" aria-hidden="true">{% for number in range(1, pv.lines_returned + 1) %}<span>{{ number }}</span>
 {% endfor %}</div>
@@ -156,7 +214,18 @@
     <button type="button" class="tree-btn"
             data-preview-goto="{{ pv.next_offset }}"
             data-preview-mode="{{ pv.preview_mode }}">Load next {{ pv.byte_limit }} bytes</button>
+    <button type="button" class="tree-btn"
+            data-preview-goto="{{ pv.next_offset }}"
+            data-preview-limit="262144"
+            data-preview-mode="{{ pv.preview_mode }}">Load 256 KiB</button>
+    <button type="button" class="tree-btn"
+            data-preview-goto="{{ pv.next_offset }}"
+            data-preview-limit="1048576"
+            data-preview-mode="{{ pv.preview_mode }}">Load 1 MiB</button>
     {% endif %}
+    <a class="tree-btn"
+       href="/evidence/{{ evidence_id }}/entries/{{ pv.entry_id }}/download"
+       title="Download the extracted copy for full offline viewing">Download full copy</a>
     <button type="button" class="link"
             data-preview-goto="{{ pv.offset }}"
             data-preview-mode="hex">Hex view</button>

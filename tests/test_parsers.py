@@ -262,3 +262,73 @@ def test_parse_istat_unallocated() -> None:
     summary = parse_istat(ISTAT_FILE.replace("Allocated File", "Unallocated File"))
     assert summary["allocated"] is False
     assert summary["is_directory"] is False
+
+
+ISTAT_EXT4_FILE = """inode: 1048756
+Allocated
+Group: 128
+Generation Id: 2592402173
+uid / gid: 0 / 0
+mode: rrw-r--r--
+Flags: Extents, 
+size: 99
+num of links: 1
+
+Inode Times:
+Accessed:\t2022-02-09 03:37:46.058909758 (UTC)
+File Modified:\t2021-10-11 08:39:49.000000000 (UTC)
+Inode Modified:\t2021-12-26 10:48:56.494079919 (UTC)
+File Created:\t2021-12-26 10:48:56.494079919 (UTC)
+
+Direct Blocks:
+4227142 
+"""
+
+
+def test_parse_istat_ext4_file() -> None:
+    summary = parse_istat(ISTAT_EXT4_FILE)
+    assert summary["inode"] == 1048756
+    assert summary["sequence"] is None
+    assert summary["allocated"] is True
+    assert summary["is_directory"] is False
+    assert summary["data_size"] == 99
+    assert summary["timestamps"]["created"].startswith("2021-12-26T10:48:56")
+    assert summary["timestamps"]["modified"].startswith("2021-10-11T08:39:49")
+    assert summary["timestamps"]["mft_modified"].startswith("2021-12-26")
+    assert summary["timestamps"]["accessed"].startswith("2022-02-09T03:37:46")
+    assert summary["attributes"] == []
+
+
+def test_parse_istat_ext4_directory() -> None:
+    summary = parse_istat(
+        ISTAT_EXT4_FILE.replace("mode: rrw-r--r--", "mode: drwxr-xr-x")
+    )
+    assert summary["is_directory"] is True
+    assert summary["inode"] == 1048756
+
+
+def test_parse_istat_ext4_unallocated() -> None:
+    summary = parse_istat(ISTAT_EXT4_FILE.replace("Allocated", "Not Allocated", 1))
+    assert summary["allocated"] is False
+
+
+def test_parse_istat_ntfs_still_wins_when_header_present() -> None:
+    summary = parse_istat(ISTAT_FILE)
+    assert summary["sequence"] == 2
+    assert summary["name"] == "bootmgr"
+
+
+def test_parse_istat_ext4_symlink_target() -> None:
+    summary = parse_istat(
+        """inode: 1048772
+Allocated
+symbolic link to: ../usr/lib/os-release
+mode: lrwxrwxrwx
+size: 21
+Direct Blocks:
+0
+"""
+    )
+    assert summary["is_symlink"] is True
+    assert summary["symlink_target"] == "../usr/lib/os-release"
+    assert summary["is_directory"] is False

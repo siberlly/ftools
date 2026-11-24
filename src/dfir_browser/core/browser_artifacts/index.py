@@ -726,6 +726,7 @@ class BrowserStore:
     def query_downloads(
         self,
         *,
+        evidence_id: str,
         profile_ids: list[str] | None,
         query: str | None,
         domain: str | None,
@@ -740,8 +741,11 @@ class BrowserStore:
         page_size: int,
         sort_dir: str = "desc",
     ) -> RecordPage:
-        where: list[str] = []
-        params: list[Any] = []
+        where: list[str] = [
+            "artifact_id IN (SELECT artifact_id FROM browser_artifacts "
+            "WHERE evidence_id = ?)"
+        ]
+        params: list[Any] = [evidence_id]
         if profile_ids:
             where.append(
                 "profile_id IN (" + ", ".join("?" for _ in profile_ids) + ")"
@@ -868,6 +872,7 @@ class BrowserStore:
     def query_visits(
         self,
         *,
+        evidence_id: str,
         profile_ids: list[str] | None,
         query: str | None,
         domain: str | None,
@@ -878,8 +883,11 @@ class BrowserStore:
         page_size: int,
         sort_dir: str = "desc",
     ) -> RecordPage:
-        where: list[str] = []
-        params: list[Any] = []
+        where: list[str] = [
+            "artifact_id IN (SELECT artifact_id FROM browser_artifacts "
+            "WHERE evidence_id = ?)"
+        ]
+        params: list[Any] = [evidence_id]
         if profile_ids:
             where.append(
                 "profile_id IN (" + ", ".join("?" for _ in profile_ids) + ")"
@@ -963,6 +971,7 @@ class BrowserStore:
     def query_cache(
         self,
         *,
+        evidence_id: str,
         profile_ids: list[str] | None,
         query: str | None,
         domain: str | None,
@@ -973,8 +982,11 @@ class BrowserStore:
         page_size: int,
         sort_dir: str = "desc",
     ) -> RecordPage:
-        where: list[str] = []
-        params: list[Any] = []
+        where: list[str] = [
+            "artifact_id IN (SELECT artifact_id FROM browser_artifacts "
+            "WHERE evidence_id = ?)"
+        ]
+        params: list[Any] = [evidence_id]
         if profile_ids:
             where.append(
                 "profile_id IN (" + ", ".join("?" for _ in profile_ids) + ")"

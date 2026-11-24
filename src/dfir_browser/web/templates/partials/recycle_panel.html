@@ -1,0 +1,111 @@
+{% set r = recycle %}
+<section class="card recycle-card" id="recycle-panel"
+         data-recycle-panel>
+  <div class="detail-head">
+    <h3>Recycle Bin metadata</h3>
+    {% if r and r.is_recycle_entry %}
+      {% if r.kind == 'info' %}
+      <span class="badge kind">$I record</span>
+      {% elif r.kind == 'content' %}
+      <span class="badge kind">$R content</span>
+      {% endif %}
+      <span class="badge {% if r.state == 'ready' %}ok{% elif r.state == 'partial' %}unalloc{% else %}deleted{% endif %}">
+        {{ r.state }}
+      </span>
+    {% endif %}
+  </div>
+
+  {% if error %}
+  <div class="alert error" role="alert">
+    <strong>Recycle metadata could not be read.</strong>
+    <p class="small-note">{{ error }}</p>
+  </div>
+  {% elif not r or not r.is_recycle_entry %}
+  <p class="muted small-note">This entry is not inside a Recycle Bin.</p>
+  {% else %}
+
+  {% if r.deleted_time_utc %}
+  <dl class="file-facts">
+    <dt>Deleted at (UTC)</dt>
+    <dd>
+      <strong>{{ r.deleted_time_utc }}</strong>
+      <div class="muted small-note">source: {{ r.deletion_source }}</div>
+    </dd>
+    <dt>Original path</dt>
+    <dd><code>{{ r.original_path or "not recorded" }}</code></dd>
+    <dt>Original size</dt>
+    <dd>{{ r.original_size|filesize }}{% if r.original_size is not none %} ({{ r.original_size }} bytes){% endif %}</dd>
+    <dt>Owner SID</dt>
+    <dd><code>{{ r.sid or r.sid_raw or "unknown" }}</code></dd>
+    <dt>$I version</dt>
+    <dd>{{ r.version }}</dd>
+  </dl>
+  {% else %}
+  <div class="alert warn small-note">
+    <strong>No deletion timestamp.</strong>
+    {{ r.warnings[-1] if r.warnings else "The $I record could not be read." }}
+  </div>
+  {% endif %}
+
+  {% if r.content %}
+  <h4>$R content file</h4>
+  <dl class="file-facts">
+    <dt>Path</dt><dd><code>{{ r.content.path }}</code></dd>
+    <dt>Size</dt>
+    <dd>
+      {{ r.content.size|filesize }}
+      {% if r.original_size is not none and r.content.size is not none %}
+        {% if r.content.size == r.original_size %}
+        <span class="badge ok">matches original</span>
+        {% else %}
+        <span class="badge unalloc">differs from original</span>
+        {% endif %}
+      {% endif %}
+    </dd>
+    <dt>Allocation</dt>
+    <dd>
+      {% if r.content.deleted %}<span class="badge deleted">deleted</span>
+      {% elif r.content.allocated %}<span class="badge ok">allocated</span>
+      {% else %}<span class="badge unalloc">unallocated</span>{% endif %}
+    </dd>
+  </dl>
+  <div class="entry-actions">
+    <button type="button" class="tree-btn"
+            data-tree-open-id="{{ r.content.entry_id }}">
+      Open $R content entry
+    </button>
+  </div>
+  {% elif r.kind == 'info' %}
+  <p class="muted small-note">
+    No matching <code>$R</code> content file remains in this directory.
+  </p>
+  {% endif %}
+
+  <details class="raw-block">
+    <summary>Indexed timestamps for this entry</summary>
+    <dl class="file-facts">
+      <dt>Created</dt><dd>{{ r.index_timestamps.created or "not recorded" }}</dd>
+      <dt>Modified</dt><dd>{{ r.index_timestamps.modified or "not recorded" }}</dd>
+      <dt>MFT modified</dt><dd>{{ r.index_timestamps.mft_modified or "not recorded" }}</dd>
+      <dt>Accessed</dt><dd>{{ r.index_timestamps.accessed or "not recorded" }}</dd>
+      <dt>Allocation</dt>
+      <dd>
+        {% if r.index_timestamps.deleted %}deleted / unallocated
+        {% elif r.index_timestamps.allocated %}allocated
+        {% else %}unallocated{% endif %}
+      </dd>
+    </dl>
+    <p class="muted small-note">
+      These are filesystem timestamps, not the deletion time. Only the
+      <code>$I</code> record stores when the item was recycled.
+    </p>
+  </details>
+
+  {% if r.warnings %}
+  <div class="alert warn small-note">
+    <strong>Notes</strong>
+    <ul>{% for warning in r.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% endif %}
+</section>

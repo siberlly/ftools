@@ -52,6 +52,35 @@
     <dt>Exposure</dt><dd><code>{{ status.raw_exposure_path or "" }}</code></dd>
   </dl>
 
+  {% if status.parse_errors and status.scan_id %}
+  {% set skipped = index_parse_error_lines(status.evidence_id, status.scan_id) %}
+  <details class="raw-block">
+    <summary>Skipped fls lines ({{ status.parse_errors }})</summary>
+    {% if skipped %}
+    <div class="table-wrap">
+      <table class="listing compact">
+        <thead><tr><th>Line</th><th>Reason</th><th>Raw output</th></tr></thead>
+        <tbody>
+          {% for item in skipped %}
+          <tr>
+            <td class="num">{{ item.line_no }}</td>
+            <td class="small-note">{{ item.error }}</td>
+            <td class="small-note"><code>{{ item.raw_line }}</code>{% if item.truncated %}…{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small-note">
+      These lines could not be turned into index entries. Everything else is
+      searchable.
+    </p>
+    {% else %}
+    <p class="muted small-note">Skipped-line details are not available.</p>
+    {% endif %}
+  </details>
+  {% endif %}
+
   <form class="form index-form" method="post"
         action="/evidence/{{ status.evidence_id }}/index"
         hx-post="/evidence/{{ status.evidence_id }}/index"

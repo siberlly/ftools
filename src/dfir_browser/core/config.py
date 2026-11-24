@@ -325,6 +325,23 @@ class Settings:
     preview_verify_hash_bytes: int = 8 * 1024 * 1024
     preview_cache_entries: int = 32
     preview_hex_max_bytes: int = 64 * 1024
+    recycle_max_info_bytes: int = 64 * 1024
+    preview_max_image_bytes: int = 32 * 1024 * 1024
+    preview_sqlite_default_rows: int = 50
+    preview_sqlite_max_rows: int = 500
+    preview_sqlite_cell_full_chars: int = 4000
+    preview_sqlite_max_tables: int = 200
+    preview_sqlite_max_columns: int = 40
+    preview_sqlite_cell_chars: int = 200
+    preview_sqlite_timeout: float = 5.0
+    preview_max_download_bytes: int = 512 * 1024 * 1024
+    shellbag_db_path: Path | None = None
+    shellbag_index_timeout: float = 300.0
+    shellbag_max_nodes: int = 50_000
+    shellbag_page_size_max: int = 500
+    shellbag_max_query_length: int = 256
+    shellbag_export_max_rows: int = 10_000
+    shellbag_auto_index: bool = True
     host: str = "127.0.0.1"
     port: int = 8080
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "testserver")
@@ -344,6 +361,11 @@ class Settings:
 
     def triage_database(self) -> Path:
         return self.triage_db_path or (self.var_dir / "cases" / "triage.db")
+
+    def shellbag_database(self) -> Path:
+        return self.shellbag_db_path or (
+            self.var_dir / "cases" / "shellbags.db"
+        )
 
     def browser_database(self) -> Path:
         return self.browser_db_path or (
@@ -460,6 +482,11 @@ class Settings:
         ).expanduser().resolve()
         evtx_db_path = Path(
             os.environ.get("DFIR_EVTX_DB", str(var_dir / "cases" / "evtx.db"))
+        ).expanduser().resolve()
+        shellbag_db_path = Path(
+            os.environ.get(
+                "DFIR_SHELLBAG_DB", str(var_dir / "cases" / "shellbags.db")
+            )
         ).expanduser().resolve()
         browser_db_path = Path(
             os.environ.get(
@@ -667,6 +694,53 @@ class Settings:
             preview_hex_max_bytes=_int_env(
                 "DFIR_PREVIEW_HEX_MAX_BYTES", 64 * 1024
             ),
+            recycle_max_info_bytes=_int_env(
+                "DFIR_RECYCLE_MAX_INFO_BYTES", 64 * 1024
+            ),
+            preview_max_image_bytes=_int_env(
+                "DFIR_PREVIEW_MAX_IMAGE_BYTES", 32 * 1024 * 1024
+            ),
+            preview_sqlite_default_rows=_int_env(
+                "DFIR_PREVIEW_SQLITE_DEFAULT_ROWS", 50
+            ),
+            preview_sqlite_max_rows=_int_env(
+                "DFIR_PREVIEW_SQLITE_MAX_ROWS", 500
+            ),
+            preview_sqlite_cell_full_chars=_int_env(
+                "DFIR_PREVIEW_SQLITE_CELL_FULL_CHARS", 4000
+            ),
+            preview_sqlite_max_tables=_int_env(
+                "DFIR_PREVIEW_SQLITE_MAX_TABLES", 200
+            ),
+            preview_sqlite_max_columns=_int_env(
+                "DFIR_PREVIEW_SQLITE_MAX_COLUMNS", 40
+            ),
+            preview_sqlite_cell_chars=_int_env(
+                "DFIR_PREVIEW_SQLITE_CELL_CHARS", 200
+            ),
+            preview_sqlite_timeout=_float_env(
+                "DFIR_PREVIEW_SQLITE_TIMEOUT", 5.0
+            ),
+            preview_max_download_bytes=_int_env(
+                "DFIR_PREVIEW_MAX_DOWNLOAD_BYTES", 512 * 1024 * 1024
+            ),
+            shellbag_db_path=shellbag_db_path,
+            shellbag_index_timeout=_float_env(
+                "DFIR_SHELLBAG_INDEX_TIMEOUT", 300.0
+            ),
+            shellbag_max_nodes=_int_env("DFIR_SHELLBAG_MAX_NODES", 50_000),
+            shellbag_page_size_max=_int_env(
+                "DFIR_SHELLBAG_PAGE_SIZE_MAX", 500
+            ),
+            shellbag_max_query_length=_int_env(
+                "DFIR_SHELLBAG_MAX_QUERY_LENGTH", 256
+            ),
+            shellbag_export_max_rows=_int_env(
+                "DFIR_SHELLBAG_EXPORT_MAX_ROWS", 10_000
+            ),
+            shellbag_auto_index=os.environ.get(
+                "DFIR_SHELLBAG_AUTO_INDEX", "1"
+            ) not in {"0", "false", "False"},
             host=os.environ.get("DFIR_HOST", "127.0.0.1"),
             port=port,
             allowed_hosts=allowed_hosts,
@@ -709,6 +783,10 @@ class Settings:
                 overrides.setdefault(
                     "browser_db_path",
                     new_var_dir / "cases" / "browser_artifacts.db",
+                )
+                overrides.setdefault(
+                    "shellbag_db_path",
+                    new_var_dir / "cases" / "shellbags.db",
                 )
                 if "ewf_mappings" not in overrides:
                     overrides["ewf_mappings"] = load_ewf_mappings(
@@ -760,6 +838,10 @@ class Settings:
             if "virustotal_db_path" in overrides:
                 overrides["virustotal_db_path"] = Path(
                     overrides["virustotal_db_path"]
+                ).expanduser().resolve()
+            if "shellbag_db_path" in overrides:
+                overrides["shellbag_db_path"] = Path(
+                    overrides["shellbag_db_path"]
                 ).expanduser().resolve()
             if "browser_db_path" in overrides:
                 overrides["browser_db_path"] = Path(

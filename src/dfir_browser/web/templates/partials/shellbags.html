@@ -1,0 +1,101 @@
+<div class="shellbags-view" data-shellbags-root data-evidence-id="{{ record.evidence_id }}">
+  <div class="detail-head">
+    <h2>ShellBags</h2>
+    <span class="muted small-note">
+      Folder and device views recovered from Shell BagMRU registry keys
+    </span>
+  </div>
+
+  <div class="alert info small-note">
+    ShellBags record which folders and devices were <strong>viewed in
+    Explorer</strong>. They are strong evidence of access to a location, but
+    they do <em>not</em> prove that a file was copied, opened or deleted.
+  </div>
+
+  <div id="shellbags-status" class="registry-status-slot"
+       hx-get="/evidence/{{ record.evidence_id }}/shellbags/status"
+       hx-trigger="load, every 2s" hx-swap="innerHTML">
+    {% include "partials/shellbags_status.html" %}
+  </div>
+
+  <div class="shellbags-toolbar">
+    <form hx-post="/evidence/{{ record.evidence_id }}/shellbags/index"
+          hx-target="#shellbags-status" hx-swap="innerHTML"
+          hx-confirm="Re-parse every shellbag hive for this evidence?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="rebuild" value="1">
+      <button type="submit" class="tree-btn">Rebuild ShellBags</button>
+    </form>
+    <a class="tree-btn" href="/evidence/{{ record.evidence_id }}/shellbags/export?format=json">Export JSON</a>
+    <a class="tree-btn" href="/evidence/{{ record.evidence_id }}/shellbags/export?format=csv">Export CSV</a>
+    <span class="muted small-note">
+      Export is bounded and never leaves the machine.
+    </span>
+  </div>
+
+  <div class="shellbags-layout">
+    <section class="shellbags-side">
+      <h3>Devices</h3>
+      <div id="shellbags-devices"
+           hx-get="/evidence/{{ record.evidence_id }}/shellbags/devices"
+           hx-trigger="load" hx-swap="innerHTML">
+        {% include "partials/shellbags_devices.html" %}
+      </div>
+      <h3>Hives</h3>
+      <ul class="shellbags-hives small-note">
+        {% for hive in hives["items"] %}
+        <li>
+          <code>{{ hive.name }}</code>
+          {% if hive.user_sid %}<div class="muted">user {{ hive.user_sid }}</div>{% endif %}
+          <div class="muted">{{ hive.node_count }} nodes · {{ hive.state }}</div>
+        </li>
+        {% else %}
+        <li class="muted">No UsrClass.dat or NTUSER.DAT indexed yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="shellbags-main">
+      <form class="filter-bar shellbags-search" data-shellbags-search
+            hx-get="/evidence/{{ record.evidence_id }}/shellbags/search"
+            hx-target="#shellbags-results" hx-swap="innerHTML">
+        <label>Name or path
+          <input type="search" name="q" maxlength="256" placeholder="DCIM, USB, Downloads">
+        </label>
+        <label>Kind
+          <select name="kind">
+            <option value="">Any</option>
+            <option value="device">Device</option>
+            <option value="folder">Folder</option>
+            <option value="file">File</option>
+          </select>
+        </label>
+        <label>User SID
+          <input type="text" name="user_sid" maxlength="128">
+        </label>
+        <label>From
+          <input type="datetime-local" name="time_from">
+        </label>
+        <label>To
+          <input type="datetime-local" name="time_to">
+        </label>
+        <button type="submit" class="tree-btn">Search</button>
+      </form>
+
+      <div id="shellbags-tree"
+           hx-get="/evidence/{{ record.evidence_id }}/shellbags/tree"
+           hx-trigger="load" hx-swap="innerHTML">
+        {% include "partials/shellbags_tree.html" %}
+      </div>
+
+      <div id="shellbags-results" class="shellbags-results" aria-live="polite"></div>
+    </section>
+
+    <aside id="shellbags-detail" class="shellbags-detail" aria-live="polite">
+      <div class="tree-placeholder">
+        <h3>Shellbag detail</h3>
+        <p class="muted small-note">Choose a folder or device to see its registry source.</p>
+      </div>
+    </aside>
+  </div>
+</div>
