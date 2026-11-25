@@ -4,18 +4,24 @@
   <div class="detail-head">
     <h2>Event log: {{ log.filename }}</h2>
     <span class="badge kind">{{ log.detected_channel }}</span>
-    {% if log.status == 'partial' %}<span class="badge unalloc">partial</span>{% endif %}
+    <span class="badge {% if log.status == 'ready' %}ok{% elif log.status == 'partial' %}unalloc{% else %}kind{% endif %}">{{ log.status }}</span>
+  </div>
+  <div class="evtx-toolbar">
     <button type="button" class="tree-btn"
             hx-get="/evidence/{{ log.evidence_id }}/event-logs"
-            hx-target="#tab-content" hx-swap="innerHTML">&larr; Event logs</button>
+            hx-target="#tab-content" hx-swap="innerHTML">&larr; All event logs</button>
     <button type="button" class="tree-btn" data-reveal-entry="{{ log.entry_id }}">Reveal in tree</button>
+    <span class="muted small-note">{{ log.records_indexed }} events indexed</span>
+    {% if log.parse_errors %}<span class="badge unalloc">{{ log.parse_errors }} parse error(s)</span>{% endif %}
   </div>
-  <p class="muted small-note">
-    <code>{{ log.evidence_path }}</code> &middot; MFT {{ log.inode if log.inode is not none else "unknown" }}
-    &middot; {{ log.records_indexed }} records &middot; {{ log.parse_errors }} parse errors
-    &middot; parser <code>{{ log.parser }} {{ log.parser_version }}</code>
-    &middot; SHA-256 <code class="hash">{{ log.sha256 or "n/a" }}</code>
-  </p>
+  <details class="evtx-provenance">
+    <summary>Log source and index details</summary>
+    <dl class="evtx-facts">
+      <dt>Evidence path</dt><dd><code>{{ log.evidence_path }}</code></dd>
+      <dt>MFT / SHA-256</dt><dd>{{ log.inode if log.inode is not none else "unknown" }} · <code class="hash">{{ log.sha256 or "n/a" }}</code></dd>
+      <dt>Parser</dt><dd><code>{{ log.parser }} {{ log.parser_version }}</code></dd>
+    </dl>
+  </details>
   {% if log.warnings %}
   <div class="alert warn small-note">
     <ul>{% for warning in log.warnings[:4] %}<li>{{ warning }}</li>{% endfor %}</ul>
@@ -24,14 +30,40 @@
 
   <div class="evtx-layout">
     <section class="evtx-query" aria-label="Event filters">
-      <form class="filter-form evtx-filter-form"
+      <form id="evtx-filter-form" class="filter-form evtx-filter-form"
             hx-get="/evidence/{{ log.evidence_id }}/event-logs/query"
             hx-target="#evtx-results" hx-swap="innerHTML" data-search-form>
         <input type="hidden" name="log_id" value="{{ log.log_id }}">
+        <label>Search events
+          <input type="text" name="q" maxlength="256" placeholder="Process, path, command line…">
+        </label>
         <label>Event ID(s)
           <input type="text" name="event_ids" maxlength="120"
                  placeholder="4688 or 4624 4625" autocomplete="off">
         </label>
+        <label>Preset
+          <select name="preset">
+            <option value="">None</option>
+            {% for preset in presets %}
+            <option value="{{ preset.preset_id }}">{{ preset.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Sort
+          <select name="sort_dir">
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+        </label>
+        <button type="submit" data-search-submit>Apply filters</button>
+        <button type="button" class="link"
+                hx-get="/evidence/{{ log.evidence_id }}/event-logs/query?log_id={{ log.log_id }}&sort_dir=desc"
+                hx-target="#evtx-results" hx-swap="innerHTML">Clear filters</button>
+        <span class="htmx-indicator muted small-note" role="status">Querying…</span>
+
+        <details class="evtx-advanced-filters">
+          <summary>More filters</summary>
+          <div class="evtx-advanced-grid">
         <label>Provider
           <input type="text" name="provider" maxlength="128" placeholder="Microsoft-Windows-...">
         </label>
@@ -60,26 +92,17 @@
         <label>To (UTC)
           <input type="text" name="time_to" maxlength="40" placeholder="2022-11-16T00:00:00Z">
         </label>
-        <label>Text contains
-          <input type="text" name="q" maxlength="256" placeholder="SysInternals.exe">
-        </label>
-        <label>Preset
-          <select name="preset">
-            <option value="">None</option>
-            {% for preset in presets %}
-            <option value="{{ preset.preset_id }}">{{ preset.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Sort
-          <select name="sort_dir">
-            <option value="asc">Oldest first</option>
-            <option value="desc">Newest first</option>
-          </select>
-        </label>
-        <button type="submit" data-search-submit>Query events</button>
-        <span class="htmx-indicator muted small-note" role="status">Querying…</span>
+          </div>
+        </details>
       </form>
+      <div class="evtx-quick-presets" aria-label="Quick investigation filters">
+        <span class="small-note muted">Quick filters:</span>
+        {% for preset in presets[:5] %}
+        <button type="button" class="link"
+                hx-get="/evidence/{{ log.evidence_id }}/event-logs/query?log_id={{ log.log_id }}&preset={{ preset.preset_id }}&sort_dir=desc"
+                hx-target="#evtx-results" hx-swap="innerHTML">{{ preset.name }}</button>
+        {% endfor %}
+      </div>
       <details class="triage-block">
         <summary>Preset definitions</summary>
         <div class="table-wrap">
@@ -113,13 +136,17 @@
     </section>
   </div>
 
-  <div id="evtx-results" class="evtx-results" aria-live="polite"></div>
+  <div id="evtx-results" class="evtx-results" aria-live="polite"
+       hx-get="/evidence/{{ log.evidence_id }}/event-logs/query?log_id={{ log.log_id }}&sort_dir=desc"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p class="muted">Loading indexed events…</p>
+  </div>
 
-  <section class="triage-block">
-    <h3>Activity summary</h3>
+  <details class="triage-block evtx-summary-block">
+    <summary>Activity summary</summary>
     <button type="button" class="tree-btn"
             hx-get="/evidence/{{ log.evidence_id }}/event-logs/summary?log_id={{ log.log_id }}"
             hx-target="#evtx-summary" hx-swap="innerHTML">Compute summary</button>
     <div id="evtx-summary"></div>
-  </section>
+  </details>
 </div>

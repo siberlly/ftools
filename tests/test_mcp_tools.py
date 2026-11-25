@@ -71,6 +71,7 @@ EXPECTED_TOOLS = {
     "preview_file_content",
     "recycle_bin_metadata",
     "browser_credential_stores",
+    "browser_credentials_analysis",
 
     "preview_sqlite_table",
 
@@ -91,7 +92,7 @@ def tools_by_name():
 
 def test_tool_set_includes_timeline_and_related_artifacts() -> None:
     assert set(tools_by_name()) == EXPECTED_TOOLS
-    assert len(EXPECTED_TOOLS) == 56
+    assert len(EXPECTED_TOOLS) == 57
 
 
 def test_tool_annotations() -> None:

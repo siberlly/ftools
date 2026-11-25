@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import re
 import time
 from pathlib import Path
@@ -261,6 +262,11 @@ def test_event_data_is_escaped(tmp_path) -> None:
 
 def test_parse_errors_are_reported_not_fatal(tmp_path) -> None:
     services, record = build_registry_services(tmp_path)
+    # Force every parse error through the buffered insert path.  The final log
+    # status must still retain the complete count after that buffer is cleared.
+    settings = dataclasses.replace(services.settings, evtx_batch_size=1)
+    services.settings = settings
+    services.evtx.settings = settings
     stub_registry_extract(services, payload=synthetic_empty_evtx())
     events = make_events()
     events.append(

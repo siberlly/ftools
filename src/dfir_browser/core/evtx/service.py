@@ -353,6 +353,7 @@ class EvtxService:
             backend = EvtxBackend(extracted, self.settings)
             batch: list[EvtxEvent] = []
             errors: list[tuple[int | None, str]] = []
+            parse_error_count = 0
             seen = 0
             indexed = 0
             first_ts = None
@@ -363,6 +364,7 @@ class EvtxService:
                     seen += 1
                     if raw.error:
                         errors.append((raw.record_id, raw.error))
+                        parse_error_count += 1
                         continue
                     if raw.xml_too_large:
                         errors.append(
@@ -371,6 +373,7 @@ class EvtxService:
                                 f"event XML exceeds {self.settings.evtx_max_event_xml_bytes} bytes",
                             )
                         )
+                        parse_error_count += 1
                         continue
                     parsed = normalize_event(
                         log_id=log_id,
@@ -381,6 +384,7 @@ class EvtxService:
                     )
                     if parsed.record_id is None:
                         errors.append((raw.record_id, "missing record id"))
+                        parse_error_count += 1
                         continue
                     event = EvtxEvent(
                         log_id=log_id,
@@ -446,7 +450,9 @@ class EvtxService:
                 self.store.insert_parse_errors(log_id, errors)
             log.records_seen = seen
             log.records_indexed = indexed
-            log.parse_errors = len(errors) + (log.parse_errors if log.status == "partial" else 0)
+            # ``errors`` is a bounded buffer and can be flushed several times;
+            # retain the full count rather than only the final partial batch.
+            log.parse_errors = parse_error_count
             log.first_event_time = first_ts
             log.last_event_time = last_ts
             log.phase = "ready"
