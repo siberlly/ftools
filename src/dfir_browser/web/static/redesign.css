@@ -328,6 +328,106 @@ button.tab:hover { border-color: transparent; background: var(--surface-subtle);
 button.tab[aria-selected="true"] { border-color: var(--line); background: var(--surface-raised); color: var(--text); box-shadow: 0 1px 2px rgba(25, 28, 32, .06); }
 .tab-panel { min-width: 0; }
 
+/* Investigation work benefits from a restrained, high-density control surface.
+   These semantic aliases are shared by legacy modules through the existing vars. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #fcfdfd;
+  --surface-subtle: #edf1f4;
+  --surface-raised: #ffffff;
+  --text: #17212b;
+  --muted: #566573;
+  --line: #d5dde4;
+  --line-strong: #aebbc7;
+  --accent: #1769aa;
+  --accent-strong: #0b4f86;
+  --accent-soft: #e3f1fb;
+  --focus: #005fa8;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-raised: 0 1px 2px rgba(23, 33, 43, .06), 0 10px 24px rgba(23, 33, 43, .045);
+}
+
+.workspace-heading {
+  align-items: flex-start;
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.workspace-heading h2 { font-size: 24px; }
+.workspace-heading p { max-width: 68ch; font-size: 14px; }
+.tabs {
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 2px rgba(23, 33, 43, .04);
+}
+button.tab {
+  min-height: 38px;
+  padding-inline: 13px;
+  border-radius: 5px;
+}
+button.tab[aria-selected="true"] {
+  border-color: transparent;
+  background: var(--text);
+  color: var(--surface-raised);
+  box-shadow: none;
+}
+button.tab[aria-selected="true"]:hover { background: var(--text); color: var(--surface-raised); }
+.tree-toolbar {
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.toolbar-group {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.toolbar-group.toolbar-options {
+  flex: 0 1 auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.tree-filter {
+  flex: 1 1 190px;
+  color: var(--text);
+  font-weight: 650;
+}
+.tree-filter input {
+  min-height: 36px;
+  width: 100%;
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+.tree-toggle {
+  min-height: 32px;
+  padding: 4px 7px;
+  border-radius: 4px;
+}
+.tree-toggle:hover { background: var(--surface-raised); }
+.tree-toggle input { inline-size: 16px; block-size: 16px; accent-color: var(--accent); }
+.tree-node.selected > .tree-row {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+.tree-row { border-left: 3px solid transparent; }
+.tree-row:hover { background: var(--surface-subtle); }
+.tree-detail { background: var(--surface-raised); }
+
+@media (max-width: 1040px) {
+  .toolbar-group.toolbar-options {
+    flex-basis: 100%;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
 .filter-form { align-items: flex-end; border-radius: var(--radius-md); background: var(--surface); }
 .filter-form label { min-width: 0; color: var(--text); }
 .alert { border-radius: var(--radius-md); }
@@ -392,6 +492,10 @@ button.tab[aria-selected="true"] { border-color: var(--line); background: var(--
   .evidence-table tbody td:nth-child(2) .evidence-link { font-size: 16px; }
   .index-status-summary { padding: 12px; }
   .index-status-body { padding: 0 12px 12px; }
+  .workspace-heading { margin-top: 32px; padding-top: 20px; }
+  .toolbar-group { gap: 6px; }
+  .toolbar-group.toolbar-options { align-items: flex-start; }
+  .tree-filter { flex-basis: 100%; }
 }
 
 @media (max-width: 320px) {

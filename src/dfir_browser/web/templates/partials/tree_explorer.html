@@ -6,31 +6,35 @@
      data-selected-id="{% if selected and selected.entry_id is defined %}{{ selected.entry_id }}{% endif %}"
      data-root-label="{{ tree_root_label }}">
   <div class="tree-toolbar" role="toolbar" aria-label="Tree controls">
-    <button type="button" class="tree-btn" data-tree-action="toggle-sidebar"
-            aria-controls="tree-pane" aria-expanded="true"
-            title="Show or hide the tree panel">Tree</button>
-    <label class="tree-filter">
-      <span class="tree-filter-label">Filter tree</span>
-      <input type="search" data-tree-filter maxlength="128"
-             placeholder="filter loaded nodes" autocomplete="off"
-             aria-label="Filter tree nodes already loaded">
-    </label>
-    <button type="button" class="tree-btn" data-tree-action="collapse-all">
-      Collapse all
-    </button>
-    <button type="button" class="tree-btn" data-tree-action="root">
-      Go to root
-    </button>
-    <label class="tree-toggle">
-      <input type="checkbox" data-tree-toggle="include-deleted"
-             {% if include_deleted %}checked{% endif %}>
-      Show deleted entries
-    </label>
-    <label class="tree-toggle">
-      <input type="checkbox" data-tree-toggle="directories-only"
-             {% if directories_only %}checked{% endif %}>
-      Directories only
-    </label>
+    <div class="toolbar-group" aria-label="Tree navigation">
+      <button type="button" class="tree-btn" data-tree-action="toggle-sidebar"
+              aria-controls="tree-pane" aria-expanded="true"
+              title="Show or hide the tree panel">Tree</button>
+      <label class="tree-filter">
+        <span class="tree-filter-label">Filter tree</span>
+        <input type="search" data-tree-filter maxlength="128"
+               placeholder="Filter loaded nodes" autocomplete="off"
+               aria-label="Filter tree nodes already loaded">
+      </label>
+      <button type="button" class="tree-btn" data-tree-action="collapse-all">
+        Collapse all
+      </button>
+      <button type="button" class="tree-btn" data-tree-action="root">
+        Go to root
+      </button>
+    </div>
+    <div class="toolbar-group toolbar-options" aria-label="Tree filters">
+      <label class="tree-toggle">
+        <input type="checkbox" data-tree-toggle="include-deleted"
+               {% if include_deleted %}checked{% endif %}>
+        Show deleted entries
+      </label>
+      <label class="tree-toggle">
+        <input type="checkbox" data-tree-toggle="directories-only"
+               {% if directories_only %}checked{% endif %}>
+        Directories only
+      </label>
+    </div>
   </div>
 
   <div class="tree-breadcrumb" data-tree-breadcrumb aria-live="polite">

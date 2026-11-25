@@ -1192,6 +1192,19 @@
     relabelActivePanel();
   }
 
+  document.addEventListener("htmx:beforeRequest", function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id === "tab-content") target.setAttribute("aria-busy", "true");
+  });
+  document.addEventListener("htmx:afterSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id === "tab-content") target.setAttribute("aria-busy", "false");
+  });
+  document.addEventListener("htmx:responseError", function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id === "tab-content") target.setAttribute("aria-busy", "false");
+  });
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot);
   } else {

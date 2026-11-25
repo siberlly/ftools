@@ -92,11 +92,11 @@
 <div class="workspace-heading">
   <div>
     <h2 id="browser-heading">Investigation workspace</h2>
-    <p>Browse the filesystem or switch to a focused artifact view.</p>
+    <p id="workspace-help">Start with Browse to inspect the evidence tree. Switch views when you need a focused artifact or correlation.</p>
   </div>
 </div>
 <div class="tabs" role="tablist" aria-label="Filesystem views"
-     data-tablist>
+     aria-describedby="workspace-help" data-tablist>
   <button type="button" role="tab" id="tab-tree" class="tab active"
           aria-selected="true" aria-controls="tab-content" tabindex="0"
           data-tab-target
@@ -144,7 +144,7 @@
           hx-target="#tab-content" hx-swap="innerHTML">Browser Artifacts</button>
 </div>
 
-<div id="tab-content" class="tab-panel" role="tabpanel"
+<div id="tab-content" class="tab-panel" role="tabpanel" aria-busy="true"
      aria-labelledby="tab-tree" tabindex="0">
   <div class="tree-explorer-slot"
        hx-get="{{ tree_url }}"
