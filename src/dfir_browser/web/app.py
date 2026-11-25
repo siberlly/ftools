@@ -3480,7 +3480,6 @@ def create_app(
         profile: str | None = None,
         protection: str | None = None,
         q: str | None = None,
-        unmask: bool = False,
     ) -> HTMLResponse:
         try:
             get_record(evidence_id)
@@ -3492,7 +3491,7 @@ def create_app(
             analysis = services.browser_artifacts.analyze_credentials(
                 evidence_id,
                 artifact_id=artifact_id,
-                mask_sensitive=not unmask,
+                mask_sensitive=True,
                 browser_filter=browser,
                 profile_filter=profile,
                 query=q,
@@ -3529,7 +3528,6 @@ def create_app(
         profile: str | None = None,
         protection: str | None = None,
         q: str | None = None,
-        unmask: bool = False,
     ) -> JSONResponse:
         try:
             get_record(evidence_id)
@@ -3541,7 +3539,7 @@ def create_app(
             analysis = services.browser_artifacts.analyze_credentials(
                 evidence_id,
                 artifact_id=artifact_id,
-                mask_sensitive=not unmask,
+                mask_sensitive=True,
                 browser_filter=browser,
                 profile_filter=profile,
                 query=q,
@@ -3569,7 +3567,6 @@ def create_app(
         profile: str | None = None,
         protection: str | None = None,
         q: str | None = None,
-        unmask: bool = False,
     ) -> Response:
         try:
             get_record(evidence_id)
@@ -3581,14 +3578,14 @@ def create_app(
             analysis = services.browser_artifacts.analyze_credentials(
                 evidence_id,
                 artifact_id=artifact_id,
-                mask_sensitive=not unmask,
+                mask_sensitive=True,
                 browser_filter=browser,
                 profile_filter=profile,
                 query=q,
                 protection_filter=protection,
             )
             if format.lower() == "csv":
-                csv_data = export_credentials_csv(analysis.records, mask_sensitive=not unmask)
+                csv_data = export_credentials_csv(analysis.records, mask_sensitive=True)
                 return Response(
                     content=csv_data,
                     media_type="text/csv",
@@ -3596,7 +3593,7 @@ def create_app(
                         "Content-Disposition": f'attachment; filename="credentials_{evidence_id}.csv"'
                     },
                 )
-            json_data = export_credentials_json(analysis.records, mask_sensitive=not unmask)
+            json_data = export_credentials_json(analysis.records, mask_sensitive=True)
             return Response(
                 content=json_data,
                 media_type="application/json",

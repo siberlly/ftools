@@ -569,6 +569,15 @@ def test_masking_and_unmasking_logic():
     assert "a***n@bank.test" in csv_masked
     assert "OSCRYPT_AES_GCM" in csv_masked
 
+    # Compatibility flags cannot turn a redacted forensic export into a
+    # credential dump.
+    assert "admin@bank.test" not in export_credentials_json(
+        [rec], mask_sensitive=False
+    )
+    assert "admin@bank.test" not in export_credentials_csv(
+        [rec], mask_sensitive=False
+    )
+
 
 def test_corrupted_databases_and_malformed_json(tmp_path):
     from dfir_browser.core.browser_artifacts.credentials import (

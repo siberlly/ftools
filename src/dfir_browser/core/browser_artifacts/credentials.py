@@ -612,18 +612,21 @@ def export_credentials_json(
     *,
     mask_sensitive: bool = True,
 ) -> str:
-    """Export analyzed credential records as clean JSON with redaction by default."""
+    """Export credential records as redacted forensic metadata only.
+
+    ``mask_sensitive`` remains accepted for compatibility, but exports never
+    include raw usernames or any credential secret.
+    """
     exported = []
     for r in records:
         d = r.to_dict()
-        if mask_sensitive:
-            d["username_raw"] = None
+        d["username_raw"] = None
         exported.append(d)
     return json.dumps(
         {
             "trust": TRUST_LABEL,
             "count": len(exported),
-            "mask_sensitive": mask_sensitive,
+            "mask_sensitive": True,
             "records": exported,
         },
         indent=2,
@@ -636,7 +639,7 @@ def export_credentials_csv(
     *,
     mask_sensitive: bool = True,
 ) -> str:
-    """Export analyzed credential records as CSV with redaction by default."""
+    """Export credential records as redacted forensic metadata only."""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -662,7 +665,7 @@ def export_credentials_csv(
         "evidence_id",
     ])
     for r in records:
-        username = r.username_masked if mask_sensitive else (r.username_raw or r.username_masked)
+        username = r.username_masked
         writer.writerow([
             r.website,
             r.action_url or "",

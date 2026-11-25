@@ -1765,7 +1765,6 @@ def browser_credentials_analysis(
     profile: str | None = None,
     protection: str | None = None,
     query: str | None = None,
-    unmask: bool = False,
 ) -> dict[str, Any]:
     with correlation_scope("mcp"):
         try:
@@ -1774,7 +1773,7 @@ def browser_credentials_analysis(
             result = services.browser_artifacts.analyze_credentials(
                 evidence_id,
                 artifact_id=artifact_id,
-                mask_sensitive=not unmask,
+                mask_sensitive=True,
                 browser_filter=browser,
                 profile_filter=profile,
                 query=query,
