@@ -740,7 +740,8 @@ class EvidenceService:
             )
         return digest
 
-    def register(self, path: str) -> EvidenceRecord:
+    def register(self, path: str, *, case_id: str = "case01") -> EvidenceRecord:
+        case_id = self.policy.validate_case_id(case_id)
         source = self.policy.validate_evidence_path(path)
         evidence_id = make_evidence_id(source)
         try:
@@ -931,6 +932,7 @@ class EvidenceService:
             layout=layout,
             registered_at=utc_now_iso(),
             status=status,
+            case_id=case_id,
             warnings=list(dict.fromkeys(warnings)),
         )
         self.registry.upsert(record.to_dict())

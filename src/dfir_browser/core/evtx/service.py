@@ -42,7 +42,6 @@ from .presets import PresetNotFound, get_preset, list_presets
 
 logger = logging.getLogger("dfir_browser.evtx")
 
-CASE_ID = "case01"
 
 
 def _now() -> str:
@@ -502,7 +501,7 @@ class EvtxService:
         if log.extract_relpath:
             candidate = self.settings.var_dir / log.extract_relpath
             try:
-                resolved = self._validate_extracted(str(candidate))
+                resolved = self._validate_extracted(str(candidate), self.evidence.get(log.evidence_id).case_id)
             except DFIRError as exc:
                 note = (
                     "previous working copy was unsafe or missing; "
@@ -523,16 +522,16 @@ class EvtxService:
                     note = "previous working copy changed; re-extracted"
         else:
             note = None
-        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
-        extracted = self._validate_extracted(extraction.output_path)
+        extraction = self.filesystem.extract_entry(record, entry, record.case_id)
+        extracted = self._validate_extracted(extraction.output_path, record.case_id)
         try:
             os.chmod(extracted, 0o600)
         except OSError:
             pass
         return extracted, False, note
 
-    def _validate_extracted(self, path: str) -> Path:
-        exports = self.policy.case_exports_dir(CASE_ID)
+    def _validate_extracted(self, path: str, case_id: str) -> Path:
+        exports = self.policy.case_exports_dir(case_id)
         candidate = Path(path)
         try:
             info = os.lstat(candidate)
@@ -572,7 +571,8 @@ class EvtxService:
             return False
         try:
             resolved = self._validate_extracted(
-                str(self.settings.var_dir / log.extract_relpath)
+                str(self.settings.var_dir / log.extract_relpath),
+                self.evidence.get(log.evidence_id).case_id,
             )
             sha256, size = _sha256_file(resolved)
         except (DFIRError, OSError):

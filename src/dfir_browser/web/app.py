@@ -398,12 +398,28 @@ def create_app(
         evidences: list[EvidenceRecord] = []
         registry_error = None
         try:
+            active_case = services.cases.active() if hasattr(services, "cases") else None
             evidences = services.evidence.list()
+            if active_case is not None:
+                evidences = [item for item in evidences if item.case_id == active_case.case_id]
         except USER_ERRORS as exc:
             registry_error = str(exc)
             logger.error("cannot read evidence registry: %s", exc)
+        cases = []
+        if hasattr(services, "cases"):
+            active_case = services.cases.active()
+            for item in services.cases.list():
+                data = item.to_dict()
+                data["usage"] = services.cases.usage(item.case_id)
+                cases.append(data)
+            active_case_data = active_case.to_dict()
+        else:
+            active_case_data = {"case_id": "case01", "name": "Default case", "status": "active"}
+            cases = [{**active_case_data, "description": "", "usage": {"evidence_count": len(evidences), "files": 0, "bytes": 0}}]
         return {
             "evidences": evidences,
+            "cases": cases,
+            "active_case": active_case_data,
             "allowed_roots": [str(root) for root in settings.allowed_roots],
             "error": error or registry_error,
         }
@@ -450,7 +466,10 @@ def create_app(
         except CsrfRejected as exc:
             return _csrf_forbidden(exc)
         try:
-            record = services.evidence.register(path)
+            if hasattr(services, "cases"):
+                record = services.evidence.register(path, case_id=services.cases.active().case_id)
+            else:
+                record = services.evidence.register(path)
         except USER_ERRORS as exc:
             logger.warning("evidence registration rejected: %s", exc)
             return render(
@@ -471,6 +490,56 @@ def create_app(
         return RedirectResponse(
             url=f"/evidence/{record.evidence_id}", status_code=303
         )
+
+    @app.post("/cases")
+    def create_case(
+        request: Request,
+        case_id: str = Form(...),
+        name: str = Form(...),
+        description: str = Form(""),
+        csrf_token: str | None = Form(None),
+    ) -> Response:
+        try:
+            csrf.validate(request, csrf_token)
+            services.cases.create(case_id, name, description)
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        except USER_ERRORS as exc:
+            return render(request, "index.html", index_context(str(exc)), status_code=400)
+        return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/cases/{case_id}/open")
+    def open_case(request: Request, case_id: str, csrf_token: str | None = Form(None)) -> Response:
+        try:
+            csrf.validate(request, csrf_token)
+            services.cases.open(case_id)
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        except USER_ERRORS as exc:
+            return render(request, "index.html", index_context(str(exc)), status_code=400)
+        return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/cases/{case_id}/archive")
+    def archive_case(request: Request, case_id: str, restore: int = Form(0), csrf_token: str | None = Form(None)) -> Response:
+        try:
+            csrf.validate(request, csrf_token)
+            services.cases.set_archived(case_id, not bool(restore))
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        except USER_ERRORS as exc:
+            return render(request, "index.html", index_context(str(exc)), status_code=400)
+        return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/cases/{case_id}/delete")
+    def delete_case(request: Request, case_id: str, csrf_token: str | None = Form(None)) -> Response:
+        try:
+            csrf.validate(request, csrf_token)
+            services.cases.delete(case_id)
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        except USER_ERRORS as exc:
+            return render(request, "index.html", index_context(str(exc)), status_code=400)
+        return RedirectResponse(url="/", status_code=303)
 
     @app.get("/evidence/{evidence_id}", response_class=HTMLResponse)
     def evidence_detail(

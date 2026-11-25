@@ -44,7 +44,6 @@ from .redaction import redact_text
 
 logger = logging.getLogger("dfir_browser.browser_artifacts")
 
-CASE_ID = "case01"
 
 
 def _now() -> str:
@@ -527,7 +526,8 @@ class BrowserArtifactService:
             return False
         try:
             path = self._validate_extracted(
-                str(self.settings.var_dir / artifact.extract_relpath)
+                str(self.settings.var_dir / artifact.extract_relpath),
+                self.evidence.get(artifact.evidence_id).case_id,
             )
         except DFIRError:
             return False
@@ -557,7 +557,7 @@ class BrowserArtifactService:
             self.store.update_phase(artifact_id, "extracting")
             record = self.evidence.get(evidence_id)
             entry = self.indexer.tree_entry(record, entry_id)
-            workdir = self._workdir(artifact_id)
+            workdir = self._workdir(artifact_id, record.case_id)
             primary, reused, note = self._prepare_copy(
                 artifact, record, entry, workdir, recover_sidecars
             )
@@ -730,8 +730,8 @@ class BrowserArtifactService:
                 },
             )
 
-    def _workdir(self, artifact_id: str) -> Path:
-        directory = self.policy.case_exports_dir(CASE_ID) / "browser" / artifact_id
+    def _workdir(self, artifact_id: str, case_id: str) -> Path:
+        directory = self.policy.case_exports_dir(case_id) / "browser" / artifact_id
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             os.chmod(directory, 0o700)
@@ -750,7 +750,7 @@ class BrowserArtifactService:
         if artifact.extract_relpath and artifact.sha256:
             candidate = self.settings.var_dir / artifact.extract_relpath
             try:
-                resolved = self._validate_extracted(str(candidate))
+                resolved = self._validate_extracted(str(candidate), record.case_id)
                 sha256, size = _sha256_file(resolved)
             except (DFIRError, OSError):
                 note = "previous working copy was missing or unsafe; re-extracted"
@@ -762,7 +762,7 @@ class BrowserArtifactService:
                 note = "previous working copy changed; re-extracted"
         else:
             note = None
-        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+        extraction = self.filesystem.extract_entry(record, entry, record.case_id)
         source = Path(extraction.output_path)
         for stale in workdir.iterdir():
             if stale.is_file() and not stale.is_symlink():
@@ -788,7 +788,7 @@ class BrowserArtifactService:
             if match is None or (match.inode is None and match.backend_type != "ad1"):
                 continue
             try:
-                extraction = self.filesystem.extract_entry(record, match, CASE_ID)
+                extraction = self.filesystem.extract_entry(record, match, record.case_id)
                 target = workdir / name
                 if target.exists():
                     target.unlink()
@@ -799,8 +799,8 @@ class BrowserArtifactService:
                     "browser sidecar %s could not be extracted: %s", name, exc
                 )
 
-    def _validate_extracted(self, path: str) -> Path:
-        exports = self.policy.case_exports_dir(CASE_ID)
+    def _validate_extracted(self, path: str, case_id: str) -> Path:
+        exports = self.policy.case_exports_dir(case_id)
         candidate = Path(path)
         try:
             info = os.lstat(candidate)
@@ -1128,7 +1128,7 @@ class BrowserArtifactService:
                 continue
             entry = entries[0]
             try:
-                extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+                extraction = self.filesystem.extract_entry(record, entry, record.case_id)
                 report = empty_report(name, entry.full_path)
                 report.exists = True
                 report.warnings = []
@@ -1267,7 +1267,7 @@ class BrowserArtifactService:
                     ls_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, ls_path)
                     if ls_entries:
                         try:
-                            ls_ext = self.filesystem.extract_entry(record, ls_entries[0], CASE_ID)
+                            ls_ext = self.filesystem.extract_entry(record, ls_entries[0], record.case_id)
                             local_state_info = inspect_local_state(Path(ls_ext.output_path))
                             break
                         except Exception as exc:
@@ -1304,11 +1304,11 @@ class BrowserArtifactService:
                             sc_entries = self.index_store.find_entries_by_exact_path(evidence_id, scan_id, sidecar_rel)
                             if sc_entries:
                                 try:
-                                    self.filesystem.extract_entry(record, sc_entries[0], CASE_ID)
+                                    self.filesystem.extract_entry(record, sc_entries[0], record.case_id)
                                 except Exception:
                                     pass
 
-                    extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+                    extraction = self.filesystem.extract_entry(record, entry, record.case_id)
                     report.exists = True
                     report.warnings = []
                     report.sha256 = getattr(extraction, "sha256", None)

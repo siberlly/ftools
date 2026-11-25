@@ -23,7 +23,6 @@ from .models import TRUST_LABEL
 
 logger = logging.getLogger("dfir_browser.preview")
 
-CASE_ID = "case01"
 PREVIEW_MODES = ("auto", "text", "hex")
 BINARY_MODES = ("hex", "registry")
 
@@ -423,7 +422,7 @@ class FilePreviewService:
     # working copy reuse
     # ------------------------------------------------------------------
     def _existing_copy(self, record, entry) -> _Copy | None:
-        exports = self.policy.case_exports_dir(CASE_ID)
+        exports = self.policy.case_exports_dir(record.case_id)
         pattern = f"inode_{entry.inode}_*"
         best: _Copy | None = None
         for candidate in sorted(exports.glob(pattern)):
@@ -484,8 +483,8 @@ class FilePreviewService:
         existing = self._existing_copy(record, entry)
         if existing is not None:
             return existing
-        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
-        path = self._validate_copy(Path(extraction.output_path))
+        extraction = self.filesystem.extract_entry(record, entry, record.case_id)
+        path = self._validate_copy(Path(extraction.output_path), record.case_id)
         try:
             os.chmod(path, 0o600)
         except OSError:
@@ -494,8 +493,8 @@ class FilePreviewService:
             path=path, reused=False, note=None, sha256=extraction.sha256
         )
 
-    def _validate_copy(self, path: Path) -> Path:
-        exports = self.policy.case_exports_dir(CASE_ID)
+    def _validate_copy(self, path: Path, case_id: str) -> Path:
+        exports = self.policy.case_exports_dir(case_id)
         try:
             info = os.lstat(path)
         except OSError as exc:

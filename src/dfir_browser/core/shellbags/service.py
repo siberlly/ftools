@@ -31,7 +31,6 @@ from .parser import parse_hive
 
 logger = logging.getLogger("dfir_browser.shellbags")
 
-CASE_ID = "case01"
 SHELLBAG_HIVE_TYPES = {"usrclass", "ntuser"}
 
 
@@ -409,7 +408,7 @@ class ShellbagService:
 
     def _workdir(self, evidence_id: str) -> Path:
         directory = (
-            self.policy.case_exports_dir(CASE_ID) / "shellbags" / evidence_id
+            self.policy.case_exports_dir(self.evidence.get(evidence_id).case_id) / "shellbags" / evidence_id
         )
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         return directory
@@ -446,7 +445,7 @@ class ShellbagService:
             except (OSError, ValueError):
                 pass
         # 3) Extract once.
-        extraction = self.filesystem.extract_entry(record, entry, CASE_ID)
+        extraction = self.filesystem.extract_entry(record, entry, record.case_id)
         source = Path(extraction.output_path)
         destination = workdir / f"entry_{entry.id}_{entry.basename}"
         if source.resolve() != destination.resolve():
@@ -480,7 +479,7 @@ class ShellbagService:
             resolved = path.resolve(strict=True)
         except OSError:
             return None
-        exports = self.policy.case_exports_dir(CASE_ID).resolve()
+        exports = self.policy.case_exports_dir(self.evidence.get(evidence_id).case_id).resolve()
         if not resolved.is_relative_to(exports) or not resolved.is_file():
             return None
         return resolved

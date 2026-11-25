@@ -216,6 +216,14 @@ input:invalid:not(:placeholder-shown) { border-color: var(--err-text); }
   box-shadow: 0 1px 2px rgba(25, 28, 32, .04);
   scrollbar-color: var(--line-strong) transparent;
 }
+
+.case-manager { margin-bottom: 20px; }
+.case-manager .detail-head { align-items: flex-start; }
+.case-create-form { margin-top: 10px; min-width: min(520px, 80vw); }
+.case-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.case-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel, #fff); min-width: 0; }
+.case-card.active { border-color: #2f6feb; box-shadow: inset 3px 0 #2f6feb; }
+.case-card p { margin: 6px 0; }
 table.listing { background: var(--surface); }
 table.listing th {
   position: sticky;

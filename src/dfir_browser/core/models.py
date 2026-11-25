@@ -84,6 +84,7 @@ class EvidenceRecord:
     layout: Layout
     registered_at: str
     status: str
+    case_id: str = "case01"
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -135,6 +136,7 @@ class EvidenceRecord:
             layout=Layout.from_dict(data.get("layout")),
             registered_at=str(data.get("registered_at", "")),
             status=str(data.get("status", "unknown")),
+            case_id=str(data.get("case_id") or "case01"),
             warnings=list(data.get("warnings") or []),
         )
 

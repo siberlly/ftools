@@ -28,6 +28,7 @@ from .recycle import RecycleBinService
 from .shellbags.index import ShellbagStore
 from .shellbags.service import ShellbagService
 from .investigation import InvestigationService
+from .cases import CaseManager
 
 
 @dataclass(slots=True)
@@ -57,6 +58,7 @@ class Services:
     shellbag_store: ShellbagStore
     shellbags: ShellbagService
     investigation: InvestigationService
+    cases: CaseManager
 
     def cleanup(self) -> None:
         self.shellbags.cleanup()
@@ -97,6 +99,7 @@ def build_services(settings: Settings | None = None) -> Services:
         audit_logger=audit,
     )
     registry = Registry(settings.var_dir / "registry.json")
+    cases = CaseManager(settings.var_dir / "cases.json", policy, registry)
     filesystem = FilesystemService(policy, runner, settings)
     provider = ImageProvider(
         mappings=settings.ewf_mappings,
@@ -250,6 +253,7 @@ def build_services(settings: Settings | None = None) -> Services:
         shellbag_store=shellbag_store,
         shellbags=shellbags,
         investigation=investigation,
+        cases=cases,
     )
 
 

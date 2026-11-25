@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dfir-browser"
-version = "0.14.0"
+version = "0.15.0"
 description = "Read-only DFIR filesystem browser for E01/RAW evidence with a FastAPI UI and an MCP stdio server"
 readme = "README.md"
 requires-python = ">=3.11"

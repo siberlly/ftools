@@ -11,9 +11,48 @@
 <div class="alert error" role="alert">{{ error }}</div>
 {% endif %}
 
+<section class="case-manager" aria-labelledby="cases-heading">
+  <div class="detail-head">
+    <div><h2 id="cases-heading">Cases</h2><p class="muted small-note">Active: <strong>{{ active_case.name }}</strong> · <code>{{ active_case.case_id }}</code></p></div>
+    <details>
+      <summary class="tree-btn">New case</summary>
+      <form class="form case-create-form" method="post" action="/cases">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Case ID <input name="case_id" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" placeholder="lab-2026-01"></label>
+        <label>Name <input name="name" required maxlength="120" placeholder="CyberDefenders lab"></label>
+        <label>Description <input name="description" maxlength="1000" placeholder="Optional notes"></label>
+        <button type="submit">Create and open</button>
+      </form>
+    </details>
+  </div>
+  <div class="case-grid">
+    {% for item in cases %}
+    <article class="case-card{% if item.case_id == active_case.case_id %} active{% endif %}">
+      <div><strong>{{ item.name }}</strong> {% if item.case_id == active_case.case_id %}<span class="badge ok">open</span>{% elif item.status == 'archived' %}<span class="badge unalloc">archived</span>{% endif %}</div>
+      <code>{{ item.case_id }}</code>
+      {% if item.description %}<p class="small-note muted">{{ item.description }}</p>{% endif %}
+      <p class="small-note muted">{{ item.usage.evidence_count }} evidence · {{ item.usage.files }} files · {{ item.usage.bytes|filesize }}</p>
+      <div class="entry-actions">
+        {% if item.status == 'active' and item.case_id != active_case.case_id %}
+        <form method="post" action="/cases/{{ item.case_id }}/open"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">Open</button></form>
+        {% endif %}
+        <form method="post" action="/cases/{{ item.case_id }}/archive">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="restore" value="{% if item.status == 'archived' %}1{% else %}0{% endif %}">
+          <button class="link">{% if item.status == 'archived' %}Restore{% else %}Archive{% endif %}</button>
+        </form>
+        {% if item.usage.evidence_count == 0 and item.case_id != active_case.case_id %}
+        <form method="post" action="/cases/{{ item.case_id }}/delete" onsubmit="return confirm('Delete this empty case workspace?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">Delete</button></form>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="intake-panel" aria-labelledby="register-heading">
   <div class="intake-copy">
-    <h2 id="register-heading">Register evidence</h2>
+    <h2 id="register-heading">Register evidence in {{ active_case.name }}</h2>
     <p>Add an E01, raw, img or ad1 file from an allowed root. Use
     <strong>Browse…</strong> to pick it; the source is opened read-only.</p>
     <details class="allowed-roots">

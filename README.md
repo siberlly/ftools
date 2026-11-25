@@ -50,6 +50,20 @@ the intended deployment and distribution model.
 This is a hardened single-user forensic MVP, not a production multi-tenant
 service.
 
+## Case manager
+
+The home workspace has a case manager. A case has a validated ID, name,
+description and `active`/`archived` state. New evidence is assigned to the
+currently open case, and extraction/preview/registry/EVTX/browser/ShellBags/
+Recycle Bin working copies are isolated under
+`var/cases/<case_id>/exports/`. Legacy registry records without a `case_id`
+are assigned to `case01` when read.
+
+The manager reports derived-workspace bytes, file count and registered
+evidence count. Archiving is reversible. Deletion is deliberately limited to
+empty, non-active cases; a case containing evidence must be archived instead,
+so the UI cannot silently remove forensic records or shared derived indexes.
+
 ## What the index and tree add
 
 - One recursive `fls -r -p -l` scan per evidence, streamed line-by-line into

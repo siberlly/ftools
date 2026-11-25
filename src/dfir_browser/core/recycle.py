@@ -28,7 +28,6 @@ from .models import TRUST_LABEL
 
 logger = logging.getLogger("dfir_browser.recycle")
 
-CASE_ID = "case01"
 SUPPORTED_VERSIONS = (1, 2)
 MIN_INFO_BYTES = 28
 RECYCLE_DIR_RE = re.compile(r"(?:^|/)\$Recycle\.Bin/+([^/]+)/+\$([IR])(.+)$", re.IGNORECASE)
@@ -435,7 +434,7 @@ class RecycleBinService:
                 details={"size": info_entry.size, "limit": limit},
             )
         try:
-            extraction = self.filesystem.extract_entry(record, info_entry, CASE_ID)
+            extraction = self.filesystem.extract_entry(record, info_entry, record.case_id)
         except DFIRError as exc:
             raise RecycleRejected(
                 f"could not read the $I record: {exc}",
@@ -449,7 +448,7 @@ class RecycleBinService:
                 "extracted $I record is not accessible",
                 code="recycle_extract_missing",
             ) from exc
-        exports = self.policy.case_exports_dir(CASE_ID).resolve()
+        exports = self.policy.case_exports_dir(record.case_id).resolve()
         if not resolved.is_relative_to(exports) or not resolved.is_file():
             raise RecycleRejected(
                 "extracted $I record is outside the case export directory",
