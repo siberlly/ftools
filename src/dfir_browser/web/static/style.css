@@ -918,6 +918,20 @@ button.secondary:hover { background: #e2eaf3; border-color: #b9c9db; }
 .browser-records { min-width: 0; margin-top: 8px; }
 .browser-detail-slot { min-width: 0; margin-top: 10px; }
 .browser-summary-slot { min-width: 0; margin-top: 10px; }
+.browser-explorer-toolbar, .browser-pagination {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0;
+}
+.browser-provenance {
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+  margin: 8px 0; background: #fafcff;
+}
+.browser-provenance summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.browser-facts {
+  display: grid; grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+  gap: 5px 10px; margin: 9px 0 0;
+}
+.browser-facts dt { font-size: 12px; font-weight: 600; }
+.browser-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; word-break: break-word; }
 .browser-detail dl.detail-grid {
   display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
   gap: 4px 12px; margin: 8px 0;
@@ -945,6 +959,7 @@ button.secondary:hover { background: #e2eaf3; border-color: #b9c9db; }
 @media (max-width: 900px) {
   .browser-detail dl.detail-grid { grid-template-columns: minmax(0, 1fr); }
   .browser-detail dt { margin-top: 6px; }
+  .browser-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
 @media (max-width: 700px) {
   .browser-filter label { flex: 1 1 100%; min-width: 0; }

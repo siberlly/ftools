@@ -1,6 +1,6 @@
 <div class="browser-table-view" data-browser-view="history"
      data-artifact-id="{{ form.artifact_id }}" data-evidence-id="{{ evidence_id }}">
-  <form class="filter-bar browser-filter" data-browser-filter
+  <form id="browser-history-filters" class="filter-bar browser-filter" data-browser-filter
         hx-get="/evidence/{{ evidence_id }}/browser/history"
         hx-target="#browser-records" hx-swap="innerHTML">
     <input type="hidden" name="artifact_id" value="{{ form.artifact_id }}">
@@ -28,6 +28,9 @@
       </select>
     </label>
     <button type="submit" class="tree-btn">Apply</button>
+    <button type="button" class="link"
+            hx-get="/evidence/{{ evidence_id }}/browser/history?artifact_id={{ form.artifact_id }}"
+            hx-target="#browser-records" hx-swap="innerHTML">Clear filters</button>
   </form>
 
   {% if error %}<p class="badge deleted">{{ error }}</p>{% endif %}
@@ -66,6 +69,13 @@
   </div>
   {% else %}
   <p class="muted">No history records match these filters.</p>
+  {% endif %}
+  {% if result.pages > 1 %}
+  <nav class="browser-pagination" aria-label="History pages">
+    {% if result.page > 1 %}<button type="button" class="tree-btn" hx-get="/evidence/{{ evidence_id }}/browser/history" hx-include="#browser-history-filters" hx-vals='{"page": {{ result.page - 1 }}}' hx-target="#browser-records" hx-swap="innerHTML">Previous</button>{% endif %}
+    <span class="small-note muted">Page {{ result.page }} / {{ result.pages }}</span>
+    {% if result.has_more %}<button type="button" class="tree-btn" hx-get="/evidence/{{ evidence_id }}/browser/history" hx-include="#browser-history-filters" hx-vals='{"page": {{ result.page + 1 }}}' hx-target="#browser-records" hx-swap="innerHTML">Next</button>{% endif %}
+  </nav>
   {% endif %}
   {% endif %}
 </div>

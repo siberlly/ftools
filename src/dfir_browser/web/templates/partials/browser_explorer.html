@@ -2,18 +2,34 @@
   <div class="detail-head">
     <h2>Browser artifacts · {{ artifact.browser }}</h2>
     <span class="muted">{{ artifact.filename }}</span>
+    <span class="badge {% if artifact.status == 'ready' %}ok{% elif artifact.status == 'partial' %}unalloc{% else %}kind{% endif %}">{{ artifact.status }}</span>
   </div>
-  <p class="muted small-note">
-    {{ artifact.evidence_path }} · backend {{ artifact.backend }} ·
-    schema v{{ artifact.schema_version }} ·
-    indexed {{ artifact.records_indexed }} of {{ artifact.records_seen }} records
-    {% if artifact.errors %}· {{ artifact.parse_errors }} parse errors{% endif %}
-  </p>
+  <div class="browser-explorer-toolbar">
+    <button type="button" class="tree-btn"
+            hx-get="/evidence/{{ record.evidence_id }}/browser"
+            hx-target="#tab-content" hx-swap="innerHTML">← All browser artifacts</button>
+    <span class="muted small-note">{{ artifact.records_indexed }} indexed / {{ artifact.records_seen }} seen</span>
+    {% if artifact.parse_errors %}<span class="badge unalloc">{{ artifact.parse_errors }} parse error(s)</span>{% endif %}
+  </div>
+  <details class="browser-provenance">
+    <summary>Artifact source and index details</summary>
+    <dl class="browser-facts">
+      <dt>Evidence path</dt><dd><code>{{ artifact.evidence_path }}</code></dd>
+      <dt>Parser</dt><dd>{{ artifact.backend }} · schema v{{ artifact.schema_version }}</dd>
+      <dt>Artifact ID</dt><dd><code>{{ artifact.artifact_id }}</code></dd>
+    </dl>
+  </details>
   {% if artifact.warnings %}
   <ul class="small-note muted">
     {% for warning in artifact.warnings %}<li>{{ warning }}</li>{% endfor %}
   </ul>
   {% endif %}
+
+  <div class="browser-summary-slot"
+       hx-get="/evidence/{{ record.evidence_id }}/browser/summary?artifact_id={{ artifact.artifact_id }}"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p class="muted">Loading activity summary…</p>
+  </div>
 
   <div class="browser-views" role="tablist" aria-label="Browser record views" data-browser-tablist>
     <button type="button" role="tab" id="btab-downloads" class="tab active"
@@ -53,9 +69,4 @@
     <p class="muted small-note">Loading credential-store metadata…</p>
   </div>
 
-  <div class="browser-summary-slot"
-       hx-get="/evidence/{{ record.evidence_id }}/browser/summary?artifact_id={{ artifact.artifact_id }}"
-       hx-trigger="load" hx-swap="innerHTML">
-    <p class="muted">Loading activity summary…</p>
-  </div>
 </div>
