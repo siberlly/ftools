@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -656,4 +657,300 @@ def test_credentials_analysis_mcp_tool(env):
     assert rec["engine"] == "gecko"
     assert rec["protection_status"] in ("NSS_ENCRYPTED", "UNKNOWN")
     assert SECRET_PASSWORD not in json.dumps(payload)
+
+
+# ==================================================================
+# Explicit credential reveal (opt-in, audited)
+# ==================================================================
+def _firefox_reveal_payload() -> tuple[bytes, bytes, str, str]:
+    """Build a synthetic key4.db + logins.json pair with real NSS crypto."""
+    import tempfile
+    from pathlib import Path
+
+    from dfir_browser.core.browser_artifacts import credentials_crypto as cc
+    from test_credentials_crypto import (
+        _aes_cbc_encrypt,
+        _der_int,
+        _der_octets,
+        _der_oid,
+        _der_seq,
+        _login_container,
+        _pbkdf2_key,
+    )
+
+    global_salt = b"\x21" * 32
+    entry_salt = b"\x31" * 20
+    iterations = 1
+    key_length = 32
+    derived = _pbkdf2_key(
+        global_salt=global_salt,
+        entry_salt=entry_salt,
+        iterations=iterations,
+        key_length=key_length,
+    )
+
+    def pbes2(stored_iv: bytes, cipher: bytes) -> bytes:
+        kdf = _der_seq(
+            _der_oid(cc.OID_PBKDF2),
+            _der_seq(
+                _der_octets(entry_salt),
+                _der_int(iterations),
+                _der_int(key_length),
+                _der_seq(_der_oid(cc.OID_HMAC_SHA256)),
+            ),
+        )
+        encryption = _der_seq(_der_oid(cc.OID_AES_256_CBC), _der_octets(stored_iv))
+        return _der_seq(
+            _der_seq(_der_oid(cc.OID_PBES2), _der_seq(kdf, encryption)),
+            _der_octets(cipher),
+        )
+
+    stored_iv = b"\x22" * 14
+    check = pbes2(
+        stored_iv, _aes_cbc_encrypt(derived, b"\x04\x0e" + stored_iv, b"password-check\x02\x02")
+    )
+    key_stored_iv = b"\x33" * 14
+    sdr_key = b"\x55" * 48
+    a11 = pbes2(
+        key_stored_iv, _aes_cbc_encrypt(derived, b"\x04\x0e" + key_stored_iv, sdr_key)
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "key4.db"
+        connection = sqlite3.connect(str(path))
+        connection.executescript(
+            """
+            CREATE TABLE metadata(item1 BLOB, item2 BLOB, id TEXT);
+            CREATE TABLE nssPrivate(id INTEGER PRIMARY KEY, a11 BLOB, a102 BLOB);
+            """
+        )
+        connection.execute(
+            "INSERT INTO metadata VALUES (?, ?, 'password')", (global_salt, check)
+        )
+        connection.execute("INSERT INTO nssPrivate VALUES (1, ?, ?)", (a11, cc.CKA_ID))
+        connection.commit()
+        connection.close()
+        key4_bytes = path.read_bytes()
+
+    login_iv = b"\x0a" * 16
+    login = {
+        "logins": [
+            {
+                "id": 1,
+                "hostname": "https://accounts.reveal.test",
+                "formSubmitURL": "https://accounts.reveal.test/login",
+                "usernameField": "email",
+                "passwordField": "password",
+                "encryptedUsername": _login_container(
+                    sdr_key[:32], login_iv, SECRET_USER.encode()
+                ),
+                "encryptedPassword": _login_container(
+                    sdr_key[:32], login_iv, SECRET_PASSWORD.encode()
+                ),
+                "encType": 1,
+                "timeCreated": 1600000000000,
+                "timeLastUsed": 1600000050000,
+                "timesUsed": 4,
+            }
+        ]
+    }
+    return (
+        key4_bytes,
+        json.dumps(login).encode(),
+        SECRET_USER,
+        SECRET_PASSWORD,
+    )
+
+
+@pytest.fixture()
+def reveal_env(tmp_path, monkeypatch):
+    """A Firefox profile with a decryptable logins.json, reveal enabled."""
+    import dataclasses
+
+    from dfir_browser.core.browser_artifacts.models import SourceArtifact
+
+    key4_bytes, logins_bytes, _user, _password = _firefox_reveal_payload()
+    rows = [
+        (PLACES, "places.sqlite", 70000, 4096, False),
+        (LOGINS, "logins.json", LOGINS_INODE, len(logins_bytes), False),
+        (KEY4, "key4.db", KEY4_INODE, len(key4_bytes), False),
+    ]
+    services, record = build_browser_services(tmp_path, rows=rows)
+    stub_browser_extract(
+        services, {LOGINS_INODE: logins_bytes, KEY4_INODE: key4_bytes}
+    )
+    artifact_id = "ba_reveal_profile"
+    services.browser_artifacts.store.upsert_artifact(
+        SourceArtifact(
+            artifact_id=artifact_id,
+            evidence_id=EVIDENCE,
+            entry_id=entry_id(services, PLACES),
+            inode=70000,
+            evidence_path=PLACES,
+            filename="places.sqlite",
+            browser="firefox",
+            artifact_type="firefox_places",
+            user="IEUser",
+            profile_name="abc.default",
+            size=4096,
+            sha256=None,
+            status="ready",
+            phase="ready",
+            backend="firefox-sqlite",
+            parser_version="test",
+        )
+    )
+    # Enable the gate on the service settings only for this test.
+    services.settings = dataclasses.replace(
+        services.settings,
+        credential_reveal_enabled=True,
+        credential_reveal_max_records=100,
+    )
+    services.browser_artifacts.settings = services.settings
+    app = create_app(services.settings, services)
+    monkeypatch.setattr(mcp_server, "get_services", lambda: services)
+    with TestClient(app) as client:
+        yield client, services, record, artifact_id
+    services.cleanup()
+
+
+def test_reveal_is_disabled_by_default(env):
+    """The gate must be off unless the host explicitly enables it."""
+    client, services, record, artifact_id = env
+    assert services.settings.credential_reveal_enabled is False
+    with pytest.raises(Exception) as excinfo:
+        services.browser_artifacts.reveal_credentials(
+            EVIDENCE, artifact_id=artifact_id
+        )
+    assert "disabled" in str(excinfo.value)
+    # A disabled gate must not have decrypted or exposed anything either.
+    assert SECRET_PASSWORD not in str(excinfo.value)
+
+
+def test_reveal_decrypts_firefox_credentials(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    result = services.browser_artifacts.reveal_credentials(
+        EVIDENCE, artifact_id=artifact_id
+    )
+    assert result.total_records == 1
+    assert result.decrypted_usernames == 1
+    assert result.decrypted_passwords == 1
+    record_out = result.records[0]
+    assert record_out.username == SECRET_USER
+    assert record_out.password == SECRET_PASSWORD
+    assert record_out.website == "https://accounts.reveal.test"
+    assert record_out.inode == LOGINS_INODE
+    assert record_out.protection_status == "NSS_ENCRYPTED"
+
+
+def test_reveal_writes_audit_event_without_secrets(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    services.browser_artifacts.reveal_credentials(
+        EVIDENCE, artifact_id=artifact_id
+    )
+    audit_path = services.settings.audit_file()
+    text = audit_path.read_text(encoding="utf-8")
+    assert "browser_credentials_reveal" in text
+    # Counts and identifiers are audited; the secrets themselves never are.
+    assert SECRET_PASSWORD not in text
+    assert SECRET_USER not in text
+    events = [
+        json.loads(line)
+        for line in text.splitlines()
+        if "browser_credentials_reveal" in line
+    ]
+    assert events
+    details = events[-1]["details"]
+    assert details["records"] == 1
+    assert details["decrypted_passwords"] == 1
+
+
+def test_reveal_web_endpoint_writes_file_not_html(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    page = client.get(
+        f"/evidence/{EVIDENCE}/browser/credentials?artifact_id={artifact_id}"
+    )
+    assert page.status_code == 200
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
+    assert "Decrypt credentials" in page.text
+
+    response = client.post(
+        f"/evidence/{EVIDENCE}/browser/credentials/reveal",
+        data={
+            "csrf_token": token,
+            "artifact_id": artifact_id,
+            "format": "csv",
+            "confirm": "yes",
+        },
+    )
+    assert response.status_code == 200
+    body = response.text
+    # The page reports counters and the export path, never the plaintext.
+    assert SECRET_PASSWORD not in body
+    assert SECRET_USER not in body
+    assert "Decrypted" not in body or "decrypted" in body
+    match = re.search(r"/credentials/reveal/export/([^\"']+)", body)
+    assert match is not None
+
+    download = client.get(
+        f"/evidence/{EVIDENCE}/browser/credentials/reveal/export/{match.group(1)}"
+    )
+    assert download.status_code == 200
+    assert SECRET_PASSWORD in download.text
+    assert SECRET_USER in download.text
+
+
+def test_reveal_web_requires_confirmation_and_csrf(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    page = client.get(
+        f"/evidence/{EVIDENCE}/browser/credentials?artifact_id={artifact_id}"
+    )
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
+
+    no_confirm = client.post(
+        f"/evidence/{EVIDENCE}/browser/credentials/reveal",
+        data={"csrf_token": token, "artifact_id": artifact_id, "format": "csv"},
+    )
+    assert no_confirm.status_code == 400
+    assert SECRET_PASSWORD not in no_confirm.text
+
+    no_csrf = client.post(
+        f"/evidence/{EVIDENCE}/browser/credentials/reveal",
+        data={"artifact_id": artifact_id, "confirm": "yes"},
+    )
+    assert no_csrf.status_code == 403
+
+
+def test_reveal_export_filename_must_be_a_basename(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    response = client.get(
+        f"/evidence/{EVIDENCE}/browser/credentials/reveal/export/..%2F..%2Fsecret.key"
+    )
+    assert response.status_code in {400, 404}
+    assert "root:" not in response.text
+
+
+def test_reveal_mcp_tool(reveal_env):
+    client, services, record, artifact_id = reveal_env
+    payload = mcp_server.browser_credentials_reveal(
+        EVIDENCE, artifact_id=artifact_id
+    )
+    assert payload["trust"] == "untrusted_evidence_data"
+    assert payload["decrypted_passwords"] == 1
+    assert payload["records"][0]["password"] == SECRET_PASSWORD
+
+
+def test_reveal_csv_export_contains_plaintext_but_neutralizes_formulas(reveal_env):
+    from dfir_browser.core.browser_artifacts.credentials_crypto import (
+        export_reveal_csv,
+    )
+
+    client, services, record, artifact_id = reveal_env
+    result = services.browser_artifacts.reveal_credentials(
+        EVIDENCE, artifact_id=artifact_id
+    )
+    text = export_reveal_csv(result.records)
+    assert SECRET_PASSWORD in text
+    assert "website" in text.splitlines()[0]
+    assert "source_path" in text.splitlines()[0]
 

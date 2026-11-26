@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -3586,7 +3587,14 @@ def create_app(
         return render(
             request,
             "partials/browser_credentials.html",
-            {"credentials": result, "analysis": analysis, "error": None},
+            {
+                "credentials": result,
+                "analysis": analysis,
+                "error": None,
+                "reveal_enabled": bool(
+                    getattr(services.settings, "credential_reveal_enabled", False)
+                ),
+            },
         )
 
     @app.get("/evidence/{evidence_id}/browser/credentials/api")
@@ -3674,6 +3682,152 @@ def create_app(
             return JSONResponse(
                 {"ok": False, "error": _error_payload(exc)}, status_code=400
             )
+
+    @app.post("/evidence/{evidence_id}/browser/credentials/reveal")
+    def browser_credentials_reveal(
+        request: Request,
+        evidence_id: str,
+        artifact_id: str | None = Form(None),
+        browser: str | None = Form(None),
+        profile: str | None = Form(None),
+        q: str | None = Form(None),
+        master_password: str | None = Form(None),
+        format: str = Form("csv"),
+        confirm: str | None = Form(None),
+        csrf_token: str | None = Form(None),
+    ) -> Response:
+        """Explicit, audited decryption of saved browser credentials.
+
+        The plaintext is written to a ``0600`` file under the case export
+        directory and only its path is returned. It is never rendered as HTML
+        or embedded in the JSON response, and it never reaches a log line.
+        """
+        try:
+            csrf.validate(request, csrf_token)
+            get_record(evidence_id)
+        except CsrfRejected as exc:
+            return _csrf_forbidden(exc)
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/browser_credentials_reveal.html",
+                {"error": str(exc), "result": None, "export_path": None},
+                status_code=400,
+            )
+        if (confirm or "").strip().lower() not in {"yes", "1", "true", "confirm"}:
+            return render(
+                request,
+                "partials/browser_credentials_reveal.html",
+                {
+                    "error": (
+                        "Confirmation is required: this action decrypts saved "
+                        "usernames and passwords."
+                    ),
+                    "result": None,
+                    "export_path": None,
+                },
+                status_code=400,
+            )
+        try:
+            from ..core.browser_artifacts.credentials_crypto import (
+                export_reveal_csv,
+                export_reveal_json,
+                write_reveal_export,
+            )
+
+            result = services.browser_artifacts.reveal_credentials(
+                evidence_id,
+                artifact_id=artifact_id or None,
+                browser_filter=browser or None,
+                profile_filter=profile or None,
+                query=q or None,
+                master_password=master_password or "",
+            )
+            exports = services.policy.case_exports_dir(
+                services.evidence.get(evidence_id).case_id
+            )
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            if format.lower() == "json":
+                payload = export_reveal_json(result)
+            else:
+                format = "csv"
+                payload = export_reveal_csv(result.records)
+            target = write_reveal_export(
+                exports / "credentials",
+                f"reveal_{evidence_id}_{stamp}",
+                fmt=format,
+                payload=payload,
+            )
+        except USER_ERRORS as exc:
+            return render(
+                request,
+                "partials/browser_credentials_reveal.html",
+                {"error": str(exc), "result": None, "export_path": None},
+                status_code=400,
+            )
+        # The result object itself holds plaintext, so only counters and the
+        # server-generated export path are handed to the template.
+        return render(
+            request,
+            "partials/browser_credentials_reveal.html",
+            {
+                "error": None,
+                "result": {
+                    "total_records": result.total_records,
+                    "decrypted_usernames": result.decrypted_usernames,
+                    "decrypted_passwords": result.decrypted_passwords,
+                    "key_status": result.key_status,
+                    "warnings": result.warnings,
+                },
+                "export_path": target.name,
+                "export_format": format,
+            },
+        )
+
+    @app.get(
+        "/evidence/{evidence_id}/browser/credentials/reveal/export/{filename}"
+    )
+    def browser_credentials_reveal_download(
+        request: Request, evidence_id: str, filename: str
+    ) -> Response:
+        """Serve a previously written reveal export from the case directory."""
+        try:
+            get_record(evidence_id)
+            exports = services.policy.case_exports_dir(
+                services.evidence.get(evidence_id).case_id
+            )
+        except USER_ERRORS as exc:
+            return JSONResponse(
+                {"ok": False, "error": _error_payload(exc)}, status_code=400
+            )
+        # The filename is server-generated; only a bare basename is accepted.
+        if filename != Path(filename).name or "/" in filename or "\\" in filename:
+            return JSONResponse(
+                {"ok": False, "error": {"message": "invalid export name"}},
+                status_code=400,
+            )
+        candidate = exports / "credentials" / filename
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return JSONResponse(
+                {"ok": False, "error": {"message": "export not found"}},
+                status_code=404,
+            )
+        if not resolved.is_relative_to((exports / "credentials").resolve()) or not resolved.is_file():
+            return JSONResponse(
+                {"ok": False, "error": {"message": "export not found"}},
+                status_code=404,
+            )
+        media = "text/csv" if resolved.suffix == ".csv" else "application/json"
+        return Response(
+            content=resolved.read_bytes(),
+            media_type=media,
+            headers={
+                "Content-Disposition": f'attachment; filename="{resolved.name}"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get(
         "/evidence/{evidence_id}/browser/summary", response_class=HTMLResponse

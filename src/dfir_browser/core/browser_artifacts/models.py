@@ -381,6 +381,44 @@ def profile_id_for(evidence_id: str, browser: str, user: str | None, profile: st
 
 
 @dataclass(slots=True)
+class CredentialRevealResult:
+    """Plaintext credentials from an explicit, audited analyst request.
+
+    Unlike :class:`CredentialAnalysisResult`, this object carries decrypted
+    secrets. It must never be rendered into HTML, a URL, a log line or the audit
+    log; the web layer writes it to a ``0600`` export file instead.
+    """
+
+    evidence_id: str
+    records: list[Any]
+    key_status: list[dict[str, str]]
+    total_records: int
+    decrypted_usernames: int
+    decrypted_passwords: int
+    browsers_found: list[str]
+    profiles_found: list[str]
+    warnings: list[str] = field(default_factory=list)
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trust": TRUST_LABEL,
+            "evidence_id": self.evidence_id,
+            "records": [
+                r.to_dict() if hasattr(r, "to_dict") else r for r in self.records
+            ],
+            "key_status": [dict(item) for item in self.key_status],
+            "total_records": self.total_records,
+            "decrypted_usernames": self.decrypted_usernames,
+            "decrypted_passwords": self.decrypted_passwords,
+            "browsers_found": list(self.browsers_found),
+            "profiles_found": list(self.profiles_found),
+            "warnings": list(self.warnings),
+            "note": self.note,
+        }
+
+
+@dataclass(slots=True)
 class CredentialRecord:
     record_id: str
     website: str

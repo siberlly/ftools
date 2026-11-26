@@ -851,6 +851,9 @@ never malware verdicts.
 | `DFIR_BROWSER_PAGE_SIZE_DEFAULT` / `_MAX` | `100` / `500` | pagination |
 | `DFIR_BROWSER_MAX_QUERY_LENGTH` | `256` | filter length |
 | `DFIR_BROWSER_BATCH_SIZE` | `500` | insert batch size |
+| `DFIR_CREDENTIAL_REVEAL` | `0` | enable the explicit credential reveal action |
+| `DFIR_CREDENTIAL_REVEAL_MAX_RECORDS` | `5000` | reveal record cap (hard cap 5000) |
+| `DFIR_CREDENTIAL_REVEAL_MAX_CHARS` | `4096` | per-value character cap |
 
 ### Troubleshooting
 
@@ -887,6 +890,67 @@ secrets and asserts they never appear in the response.
 
 Endpoints: `GET /evidence/{id}/browser/credentials?artifact_id=` (HTML) and
 `.../credentials/api`. MCP: `browser_credential_stores`.
+
+### Explicit credential reveal (opt-in)
+
+A separate, **disabled-by-default** action decrypts saved usernames and
+passwords. It never runs as a side effect of opening the explorer: the analyst
+must enable it on the host and then confirm it per request.
+
+```bash
+export DFIR_CREDENTIAL_REVEAL=1   # default: 0 (off)
+```
+
+The decryption code lives in `core/browser_artifacts/credentials_crypto.py` and
+is the only place a browser secret is ever decrypted. The default inspection
+path (`credential_stores`, `analyze_credentials`, the redacted exports and their
+tests) is unchanged and still returns metadata only.
+
+| Container | Support |
+| --- | --- |
+| Chromium OSCrypt `v10`/`v11` | AES-256-GCM; master key from `Local State` `os_crypt.encrypted_key` (DPAPI unwrapped via `crypt32` on Windows, `ctypes` only) |
+| Chromium pre-`v10` | legacy AES-256-CBC with the fixed OSCrypt IV |
+| Chromium `0x01` DWORD header | bare Windows DPAPI blob |
+| Chromium `username_value` | stored in plaintext; returned as-is (bounded) |
+| Firefox `encType: 0` | values are already plaintext |
+| Firefox `encType: 1` | NSS SDRM, pure Python (no `libnss3`), needs `key4.db` from the same profile |
+| Firefox key container | `pkcs5 pbes2` / PBES2-HMAC-SHA256 / AES-256-CBC and legacy `pbeWithSHA1AndTripleDES-CBC` |
+| Firefox Primary Password | pass it explicitly; without it the `password-check` fails and the status is `failed`, never a guessed value |
+
+Behavior and limits:
+
+- Chromium keys are resolved per profile from the extracted `Local State`; a
+  DPAPI-wrapped key on a non-Windows host is reported `unavailable`, not an
+  error, and nothing is ever sent off the machine.
+- Every record carries a per-field status (`decrypted`, `unavailable`,
+  `failed`, `skipped`) plus a detail string. A failure never becomes a partial
+  or empty-looking success: the plaintext is `null` whenever the status is not
+  `decrypted`.
+- The plaintext is **never** returned inline. The web action writes a `0600`
+  file under `var/cases/<case>/exports/credentials/` and returns only its name;
+  a download route serves it with `Cache-Control: no-store`. CSV cells are
+  prefixed when they start with a spreadsheet formula character.
+- Each call records one `browser_credentials_reveal` audit event with the
+  artifact, profile count, record count, decrypted username/password counts and
+  key statuses. Secrets, keys and the master password never reach the audit
+  log, the application log or an error message.
+- Resources are bounded by `DFIR_CREDENTIAL_REVEAL_MAX_RECORDS` (default 5000,
+  hard cap 5000) and `DFIR_CREDENTIAL_REVEAL_MAX_CHARS` (default 4096). An
+  oversize artifact is rejected instead of silently truncated.
+
+Endpoints:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/evidence/{id}/browser/credentials/reveal` | CSRF + `confirm` required; writes the `0600` export |
+| GET | `/evidence/{id}/browser/credentials/reveal/export/{filename}` | serve a previously written export (bare basename only) |
+
+MCP: `browser_credentials_reveal`. It is annotated read-only for the evidence,
+but treat its response as sensitive plaintext.
+
+Without `DFIR_CREDENTIAL_REVEAL=1` the service raises
+`credential_reveal_disabled`, the panel shows only an explanatory note, and the
+MCP tool fails the same way.
 
 ### Evidence isolation
 

@@ -546,8 +546,15 @@ def parse_firefox_logins(
         pass_field = item.get("passwordField")
         enc_type = item.get("encType")
 
-        raw_user = str(enc_user) if enc_user is not None else None
-        masked_user = mask_username(raw_user) if enc_type == 0 else "[ENCRYPTED]"
+        # ``encryptedUsername`` is a base64 NSS SDRM container, not a username.
+        # Masking the base64 would display meaningless characters, so expose the
+        # real field name and mark the value as encrypted instead.
+        if enc_type == 0:
+            raw_user = str(enc_user) if enc_user is not None else None
+            masked_user = mask_username(raw_user)
+        else:
+            raw_user = None
+            masked_user = "[ENCRYPTED]"
         has_pass = bool(enc_pass)
 
         prot_status, prot_details = determine_firefox_protection(

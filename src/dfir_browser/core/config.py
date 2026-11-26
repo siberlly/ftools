@@ -317,6 +317,9 @@ class Settings:
     browser_page_size_max: int = 500
     browser_max_query_length: int = 256
     browser_batch_size: int = 500
+    credential_reveal_enabled: bool = False
+    credential_reveal_max_records: int = 5_000
+    credential_reveal_max_chars: int = 4_096
     preview_default_limit: int = 64 * 1024
     preview_max_bytes: int = 1024 * 1024
     preview_text_max_lines: int = 10_000
@@ -672,6 +675,13 @@ class Settings:
                 "DFIR_BROWSER_MAX_QUERY_LENGTH", 256
             ),
             browser_batch_size=_int_env("DFIR_BROWSER_BATCH_SIZE", 500),
+            credential_reveal_enabled=_bool_env("DFIR_CREDENTIAL_REVEAL", False),
+            credential_reveal_max_records=_int_env(
+                "DFIR_CREDENTIAL_REVEAL_MAX_RECORDS", 5_000
+            ),
+            credential_reveal_max_chars=_int_env(
+                "DFIR_CREDENTIAL_REVEAL_MAX_CHARS", 4_096
+            ),
             preview_default_limit=_int_env(
                 "DFIR_PREVIEW_DEFAULT_LIMIT", 64 * 1024
             ),

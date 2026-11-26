@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
+import sqlite3
 import stat
 import threading
 import time
@@ -34,6 +36,7 @@ from .models import (
     BackendUnavailable,
     BrowserArtifactRejected,
     BrowserProfileRow,
+    CredentialRevealResult,
     RecordPage,
     SourceArtifact,
     artifact_id_for,
@@ -1409,6 +1412,532 @@ class BrowserArtifactService:
             note=METADATA_ONLY_NOTE,
             provenance=overall_prov,
         )
+
+    # ------------------------------------------------------------------
+    # explicit credential reveal (opt-in, audited, never inline HTML)
+    # ------------------------------------------------------------------
+    def reveal_credentials(
+        self,
+        evidence_id: str,
+        *,
+        artifact_id: str | None = None,
+        browser_filter: str | None = None,
+        profile_filter: str | None = None,
+        query: str | None = None,
+        master_password: str = "",
+    ) -> CredentialRevealResult:
+        """Decrypt saved usernames and passwords for an explicit analyst request.
+
+        This is the only service entry point that returns credential plaintext.
+        It is gated by ``settings.credential_reveal_enabled`` (environment
+        ``DFIR_CREDENTIAL_REVEAL``, default off), records one audit event with
+        counts and identifiers only, and never puts a secret in an error, a log
+        line or the audit log.
+
+        Callers must not render the result as HTML; the web layer writes it to a
+        ``0600`` file under the case export directory and returns the path.
+        """
+        from .credentials import empty_report
+        from .credentials_crypto import (
+            MAX_RECORDS,
+            STATUS_OK,
+            FirefoxKey,
+            RevealedCredential,
+            load_chromium_key,
+            load_firefox_key,
+        )
+        from .detector import identify_browser_details
+        from .models import CredentialRevealResult
+
+        if not getattr(self.settings, "credential_reveal_enabled", False):
+            raise BrowserArtifactRejected(
+                "credential reveal is disabled; set DFIR_CREDENTIAL_REVEAL=1 on "
+                "the analysis host to enable explicit decryption",
+                code="credential_reveal_disabled",
+            )
+
+        record = self.evidence.get(evidence_id)
+        scan_id = self._scan_id(record)
+        partition_offset = getattr(record, "offset_sectors", None)
+        if partition_offset is None and getattr(record, "layout", None):
+            partition_offset = getattr(record.layout, "offset_sectors", None)
+        if partition_offset is None and hasattr(record, "exposure_details"):
+            partition_offset = record.exposure_details.get("partition_start_sectors")
+
+        limit = max(
+            1,
+            min(
+                int(getattr(self.settings, "credential_reveal_max_records", MAX_RECORDS)),
+                MAX_RECORDS,
+            ),
+        )
+        max_chars = int(getattr(self.settings, "credential_reveal_max_chars", 4096))
+
+        profile_paths = self._credential_profile_paths(
+            evidence_id, scan_id, artifact_id
+        )
+
+        records: list[RevealedCredential] = []
+        key_status: list[dict[str, str]] = []
+        warnings: list[str] = []
+        browsers_found: set[str] = set()
+        profiles_found: set[str] = set()
+        truncated = False
+
+        for prof_path in profile_paths:
+            brand, engine, detected_profile, brand_label = identify_browser_details(
+                prof_path
+            )
+            profile_name = detected_profile or prof_path.rsplit("/", 1)[-1]
+            os_user = user_from_path(prof_path)
+            if brand != "unknown":
+                browsers_found.add(brand_label)
+            if profile_name:
+                profiles_found.add(profile_name)
+
+            chromium_key = None
+            firefox_key = FirefoxKey(
+                "unavailable", "not a Firefox profile", None, None
+            )
+            if engine == "chromium":
+                user_data_path = (
+                    prof_path.rsplit("/", 1)[0]
+                    if "/User Data/" in prof_path
+                    else prof_path
+                )
+                local_state = None
+                for candidate in (
+                    f"{user_data_path}/Local State",
+                    f"{prof_path}/Local State",
+                ):
+                    entries = self.index_store.find_entries_by_exact_path(
+                        evidence_id, scan_id, candidate
+                    )
+                    if not entries:
+                        continue
+                    try:
+                        extraction = self.filesystem.extract_entry(
+                            record, entries[0], record.case_id
+                        )
+                        local_state = Path(extraction.output_path)
+                        break
+                    except Exception as exc:  # noqa: BLE001 - panel must not fail
+                        warnings.append(
+                            "Local State could not be extracted: "
+                            f"{type(exc).__name__}"
+                        )
+                chromium_key = load_chromium_key(local_state)
+                key_status.append(
+                    {
+                        "profile": profile_name,
+                        "browser": brand_label,
+                        "key": "oscrypt",
+                        "status": chromium_key.status,
+                        "details": chromium_key.details,
+                    }
+                )
+            elif engine == "gecko":
+                key4_path = None
+                entries = self.index_store.find_entries_by_exact_path(
+                    evidence_id, scan_id, f"{prof_path}/key4.db"
+                )
+                if entries:
+                    try:
+                        extraction = self.filesystem.extract_entry(
+                            record, entries[0], record.case_id
+                        )
+                        key4_path = Path(extraction.output_path)
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append(
+                            f"key4.db could not be extracted: {type(exc).__name__}"
+                        )
+                firefox_key = load_firefox_key(key4_path, master_password)
+                key_status.append(
+                    {
+                        "profile": profile_name,
+                        "browser": brand_label,
+                        "key": "nss-sdrm",
+                        "status": firefox_key.status,
+                        "details": firefox_key.details,
+                    }
+                )
+
+            for name in ("Login Data", "Login Data For Account", "logins.json"):
+                relpath = f"{prof_path}/{name}"
+                entries = self.index_store.find_entries_by_exact_path(
+                    evidence_id, scan_id, relpath
+                )
+                if not entries:
+                    continue
+                entry = entries[0]
+                report = empty_report(name, entry.full_path)
+                report.exists = True
+                report.size = int(entry.size) if entry.size is not None else None
+                report.source_path = entry.full_path
+                report.inode = entry.inode
+                report.partition_offset = partition_offset
+                report.evidence_id = evidence_id
+
+                extracted_path = None
+                try:
+                    extraction = self.filesystem.extract_entry(
+                        record, entry, record.case_id
+                    )
+                    extracted_path = Path(extraction.output_path)
+                    report.sha256 = getattr(extraction, "sha256", None)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(
+                        f"{name} could not be extracted: {type(exc).__name__}"
+                    )
+
+                if extracted_path is None or not extracted_path.is_file():
+                    continue
+
+                context = {
+                    "brand": brand,
+                    "engine": engine,
+                    "profile": profile_name,
+                    "user": os_user,
+                    "source_path": entry.full_path,
+                    "source_name": name,
+                    "inode": entry.inode,
+                    "partition_offset": partition_offset,
+                    "sha256": report.sha256,
+                    "evidence_id": evidence_id,
+                }
+                if name in {"Login Data", "Login Data For Account"}:
+                    new_records = self._reveal_chromium_rows(
+                        extracted_path,
+                        context,
+                        chromium_key,
+                        limit - len(records),
+                        max_chars,
+                    )
+                else:
+                    new_records = self._reveal_firefox_rows(
+                        extracted_path,
+                        context,
+                        firefox_key,
+                        limit - len(records),
+                        max_chars,
+                    )
+                for item in new_records:
+                    if browser_filter:
+                        needle = browser_filter.strip().lower()
+                        if (
+                            needle not in item.brand.lower()
+                            and needle not in item.engine.lower()
+                        ):
+                            continue
+                    if profile_filter:
+                        if profile_filter.strip().lower() not in item.profile.lower():
+                            continue
+                    if query:
+                        haystack = " ".join(
+                            filter(
+                                None,
+                                [
+                                    item.website,
+                                    item.action_url,
+                                    item.username,
+                                    item.profile,
+                                ],
+                            )
+                        ).lower()
+                        if query.strip().lower() not in haystack:
+                            continue
+                    records.append(item)
+                if len(records) >= limit:
+                    truncated = True
+                    break
+
+        decrypted_users = sum(1 for r in records if r.username_status == STATUS_OK)
+        decrypted_passes = sum(1 for r in records if r.password_status == STATUS_OK)
+
+        self.audit.event(
+            "browser_credentials_reveal",
+            evidence_id=evidence_id,
+            request_id=get_correlation_id(),
+            details={
+                "artifact_id": artifact_id,
+                "profiles_inspected": len(profile_paths),
+                "records": len(records),
+                "decrypted_usernames": decrypted_users,
+                "decrypted_passwords": decrypted_passes,
+                "key_status": [
+                    {"profile": item["profile"], "status": item["status"]}
+                    for item in key_status
+                ],
+                "truncated": truncated,
+            },
+        )
+
+        if truncated:
+            warnings.append(
+                f"record limit ({limit}) reached; the reveal is truncated"
+            )
+
+        return CredentialRevealResult(
+            evidence_id=evidence_id,
+            records=records,
+            key_status=key_status,
+            total_records=len(records),
+            decrypted_usernames=decrypted_users,
+            decrypted_passwords=decrypted_passes,
+            browsers_found=sorted(browsers_found),
+            profiles_found=sorted(profiles_found),
+            warnings=warnings,
+            note=(
+                "Plaintext credentials produced by an explicit, audited "
+                "analyst request. Passwords are never written to the audit "
+                "log or application log."
+            ),
+        )
+
+    def _credential_profile_paths(
+        self, evidence_id: str, scan_id: str, artifact_id: str | None
+    ) -> list[str]:
+        """Profile directories that can hold credential stores for this evidence."""
+        profile_paths: list[str] = []
+        seen: set[str] = set()
+        if artifact_id:
+            artifact = self.store.get_artifact(artifact_id)
+            if artifact.evidence_id != evidence_id:
+                raise BrowserArtifactRejected(
+                    "browser artifact does not belong to this evidence",
+                    code="browser_evidence_mismatch",
+                )
+            parent = artifact.evidence_path.rsplit("/", 1)[0]
+            profile_paths.append(parent)
+            return profile_paths
+        for artifact in self.store.list_artifacts(evidence_id):
+            parent = artifact.evidence_path.rsplit("/", 1)[0]
+            if parent not in seen:
+                seen.add(parent)
+                profile_paths.append(parent)
+        for candidate in self.index_store.find_browser_artifact_candidates(
+            evidence_id, scan_id, include_deleted=False
+        ):
+            parent = candidate.full_path.rsplit("/", 1)[0]
+            if parent not in seen:
+                seen.add(parent)
+                profile_paths.append(parent)
+        if hasattr(self.index_store, "find_credential_artifact_candidates"):
+            for candidate in self.index_store.find_credential_artifact_candidates(
+                evidence_id, scan_id, include_deleted=False
+            ):
+                parent = candidate.full_path.rsplit("/", 1)[0]
+                if parent not in seen:
+                    seen.add(parent)
+                    profile_paths.append(parent)
+        return profile_paths
+
+    def _reveal_chromium_rows(
+        self,
+        path: Path,
+        context: dict[str, Any],
+        key,
+        remaining: int,
+        max_chars: int,
+    ) -> list[Any]:
+        """Decrypt Chromium `Login Data` rows."""
+        from .credentials_crypto import (
+            STATUS_OK,
+            STATUS_SKIPPED,
+            RevealedCredential,
+            clip_text,
+            decrypt_chromium_blob,
+            determine_status_label,
+        )
+        from .timestamp import from_chromium
+
+        results: list[Any] = []
+        if remaining <= 0:
+            return results
+        try:
+            connection = sqlite3.connect(
+                f"file:{path}?mode=ro&immutable=1", uri=True, timeout=5.0
+            )
+        except sqlite3.Error:
+            return results
+        connection.row_factory = sqlite3.Row
+        try:
+            tables = {
+                row["name"]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "logins" not in tables:
+                return results
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(logins)")
+            }
+
+            def column(name: str, fallback: str) -> str:
+                return f'"{name}"' if name in columns else f"{fallback} AS {name}"
+
+            query = (
+                "SELECT "
+                + ", ".join(
+                    [
+                        column("origin_url", "NULL"),
+                        column("action_url", "NULL"),
+                        column("username_value", "NULL"),
+                        column("password_value", "NULL"),
+                        column("date_created", "NULL"),
+                        column("date_last_used", "NULL"),
+                        column("date_password_modified", "NULL"),
+                        column("times_used", "0"),
+                    ]
+                )
+                + " FROM logins ORDER BY date_created DESC"
+            )
+            for row in connection.execute(query).fetchmany(remaining):
+                raw_user = row["username_value"]
+                username = clip_text(raw_user, max_chars)
+                blob = bytes(row["password_value"]) if row["password_value"] else b""
+                status, plaintext, detail = decrypt_chromium_blob(blob, key.key)
+                password = (
+                    clip_text(plaintext, max_chars) if status == STATUS_OK else None
+                )
+                created = from_chromium(row["date_created"])
+                used = from_chromium(row["date_last_used"])
+                changed = (
+                    from_chromium(row["date_password_modified"])
+                    if row["date_password_modified"]
+                    else None
+                )
+                results.append(
+                    RevealedCredential(
+                        website=str(row["origin_url"] or row["action_url"] or "unknown"),
+                        action_url=clip_text(row["action_url"], 4096),
+                        brand=context.get("brand") or "chromium",
+                        engine=context.get("engine") or "chromium",
+                        profile=context.get("profile") or "Default",
+                        os_user=context.get("user"),
+                        username=username,
+                        password=password,
+                        username_status=(
+                            STATUS_OK if username else STATUS_SKIPPED
+                        ),
+                        password_status=status,
+                        username_detail=(
+                            "stored in plaintext (Chromium username_value)"
+                            if username
+                            else "no username stored"
+                        ),
+                        password_detail=detail,
+                        protection_status=determine_status_label(blob, key.status),
+                        created_time_utc=created.utc,
+                        last_used_time_utc=used.utc,
+                        password_changed_utc=changed.utc if changed else None,
+                        times_used=int(row["times_used"] or 0),
+                        source_path=context.get("source_path", ""),
+                        source_artifact_name=context.get("source_name", path.name),
+                        inode=context.get("inode"),
+                        partition_offset=context.get("partition_offset"),
+                        sha256=context.get("sha256"),
+                        evidence_id=context.get("evidence_id", ""),
+                    )
+                )
+        except sqlite3.Error:
+            return results
+        finally:
+            connection.close()
+        return results
+
+    def _reveal_firefox_rows(
+        self,
+        path: Path,
+        context: dict[str, Any],
+        key,
+        remaining: int,
+        max_chars: int,
+    ) -> list[Any]:
+        """Decrypt Firefox ``logins.json`` entries through NSS SDRM."""
+        from .credentials_crypto import (
+            STATUS_OK,
+            STATUS_SKIPPED,
+            RevealedCredential,
+            clip_text,
+            decrypt_firefox_value,
+            determine_status_label,
+            read_bounded_file,
+        )
+        from .timestamp import from_unix_milliseconds
+
+        results: list[Any] = []
+        if remaining <= 0:
+            return results
+        try:
+            raw = read_bounded_file(path, 8 * 1024 * 1024)
+            data = json.loads(raw.decode("utf-8", "replace"))
+        except (OSError, ValueError):
+            return results
+        logins = data.get("logins") if isinstance(data, dict) else None
+        if not isinstance(logins, list):
+            return results
+        algorithm = getattr(key, "algorithm", None)
+        key_bytes = getattr(key, "key", None)
+        for item in logins[:remaining]:
+            if not isinstance(item, dict):
+                continue
+            enc_user = item.get("encryptedUsername")
+            enc_pass = item.get("encryptedPassword")
+            if item.get("encType") == 0:
+                # Explicitly unencrypted profile: the values are plaintext.
+                username = clip_text(enc_user, max_chars)
+                password = clip_text(enc_pass, max_chars)
+                user_status = STATUS_OK if username else STATUS_SKIPPED
+                pass_status = STATUS_OK if password else STATUS_SKIPPED
+                user_detail = "unencrypted (encType=0)"
+                pass_detail = "unencrypted (encType=0)"
+            else:
+                user_status, user_bytes, user_detail = decrypt_firefox_value(
+                    enc_user or "", key_bytes, algorithm
+                )
+                pass_status, pass_bytes, pass_detail = decrypt_firefox_value(
+                    enc_pass or "", key_bytes, algorithm
+                )
+                username = clip_text(user_bytes, max_chars) if user_status == STATUS_OK else None
+                password = clip_text(pass_bytes, max_chars) if pass_status == STATUS_OK else None
+            created = from_unix_milliseconds(item.get("timeCreated"))
+            used = from_unix_milliseconds(item.get("timeLastUsed"))
+            changed = (
+                from_unix_milliseconds(item.get("timePasswordChanged"))
+                if item.get("timePasswordChanged")
+                else None
+            )
+            results.append(
+                RevealedCredential(
+                    website=str(item.get("hostname") or item.get("formSubmitURL") or "unknown"),
+                    action_url=clip_text(item.get("formSubmitURL"), 4096),
+                    brand=context.get("brand") or "firefox",
+                    engine=context.get("engine") or "gecko",
+                    profile=context.get("profile") or "Default",
+                    os_user=context.get("user"),
+                    username=username,
+                    password=password,
+                    username_status=user_status,
+                    password_status=pass_status,
+                    username_detail=user_detail,
+                    password_detail=pass_detail,
+                    protection_status=determine_status_label(None, key.status),
+                    created_time_utc=created.utc,
+                    last_used_time_utc=used.utc,
+                    password_changed_utc=changed.utc if changed else None,
+                    times_used=int(item.get("timesUsed") or 0),
+                    source_path=context.get("source_path", ""),
+                    source_artifact_name=context.get("source_name", path.name),
+                    inode=context.get("inode"),
+                    partition_offset=context.get("partition_offset"),
+                    sha256=context.get("sha256"),
+                    evidence_id=context.get("evidence_id", ""),
+                )
+            )
+        return results
 
     # ------------------------------------------------------------------
     # correlation and summary

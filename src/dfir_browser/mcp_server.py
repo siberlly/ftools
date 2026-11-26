@@ -1785,6 +1785,46 @@ def browser_credentials_analysis(
 
 
 @mcp.tool(
+    name="browser_credentials_reveal",
+    description=(
+        "Explicitly DECRYPT saved browser usernames and passwords. This is the "
+        "only tool in this server that returns credential plaintext, and it "
+        "requires DFIR_CREDENTIAL_REVEAL=1 on the analysis host (default off). "
+        "Supports Chromium OSCrypt (v10/v11 AES-256-GCM, legacy AES-CBC, "
+        "Windows DPAPI) and Firefox NSS SDRM via key4.db (PBES2/AES-256 and "
+        "legacy 3DES). Every call writes a browser_credentials_reveal audit "
+        "event with counts only; no secret reaches the audit log. Failures are "
+        "reported as a per-record status (decrypted/unavailable/failed) "
+        "instead of a partial or misleading value. " + UNTRUSTED_NOTE
+    ),
+    annotations=READ_ONLY,
+)
+def browser_credentials_reveal(
+    evidence_id: str,
+    artifact_id: str | None = None,
+    browser: str | None = None,
+    profile: str | None = None,
+    query: str | None = None,
+    master_password: str | None = None,
+) -> dict[str, Any]:
+    with correlation_scope("mcp"):
+        try:
+            services = get_services()
+            services.evidence.get(evidence_id)
+            result = services.browser_artifacts.reveal_credentials(
+                evidence_id,
+                artifact_id=artifact_id,
+                browser_filter=browser,
+                profile_filter=profile,
+                query=query,
+                master_password=master_password or "",
+            )
+            return _with_trust(result.to_dict())
+        except USER_ERRORS as exc:
+            raise _fail(exc) from exc
+
+
+@mcp.tool(
     name="browser_correlate_download",
     description=(
         "Read-only correlation between one download and filesystem index "
